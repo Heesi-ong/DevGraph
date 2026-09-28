@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      # §20.1 Repository/Integration: Testcontainers로 실제 PostgreSQL을 띄운다.
+      # GitHub-hosted ubuntu 러너는 Docker가 기본 탑재되어 있어 별도 설정이 필요 없다.
+      - name: Build & Test
+        working-directory: backend
+        run: ./gradlew build
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+      - name: Unit test
+        working-directory: frontend
+        run: npm run test
+      - name: Typecheck & Build
+        working-directory: frontend
+        run: npm run build

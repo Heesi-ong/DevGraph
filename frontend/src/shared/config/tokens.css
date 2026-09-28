@@ -1,0 +1,33 @@
+/* 설계서 §16 design token. 기능 구현 전 최소 팔레트만 고정한다 — 실제 UI 디자인은 후속 작업. */
+:root {
+  --color-bg: #ffffff;
+  --color-fg: #1a1a1a;
+  --color-muted: #6b7280;
+  --color-border: #e5e7eb;
+  --color-primary: #2563eb;
+  --color-danger: #dc2626;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --space-4: 24px;
+
+  --font-sans: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #111111;
+    --color-fg: #f5f5f5;
+    --color-muted: #9ca3af;
+    --color-border: #2a2a2a;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+}

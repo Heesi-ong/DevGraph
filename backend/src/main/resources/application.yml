@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: devgraph-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/devgraph}
+    username: ${DB_USERNAME:devgraph}
+    password: ${DB_PASSWORD:devgraph}
+  jpa:
+    open-in-view: false
+    hibernate:
+      # §15.5: Flyway가 유일한 schema 변경 권한을 갖는다. JPA는 검증만 한다.
+      ddl-auto: validate
+  flyway:
+    locations: classpath:db/migration
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS:health,info}
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+devgraph:
+  auth:
+    access-token-ttl: ${ACCESS_TOKEN_TTL:PT15M}
+    refresh-token-ttl: ${REFRESH_TOKEN_TTL:P30D}
+    session-absolute-ttl-days: ${AUTH_SESSION_ABSOLUTE_TTL_DAYS:90}
+    jwt-signing-key: ${JWT_SIGNING_KEY:}
+  cors:
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173}
+  cookie:
+    secure: ${COOKIE_SECURE:true}
+  public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+  export:
+    temp-dir: ${EXPORT_TEMP_DIR:/tmp/devgraph-export}
+    max-size-mb: ${MAX_EXPORT_SIZE_MB:250}
+
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}

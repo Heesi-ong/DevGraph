@@ -1,0 +1,11 @@
+spring:
+  jpa:
+    show-sql: true
+
+logging:
+  level:
+    com.devgraph: DEBUG
+
+devgraph:
+  cookie:
+    secure: false

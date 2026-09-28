@@ -1,0 +1,7 @@
+spring:
+  jpa:
+    show-sql: false
+
+devgraph:
+  cookie:
+    secure: true

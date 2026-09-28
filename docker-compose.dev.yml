@@ -1,0 +1,42 @@
+# 설계서 §21.1 초기 배포 구조. Redis/worker/object storage는 넣지 않는다(§0, §25).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: devgraph
+      POSTGRES_USER: devgraph
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devgraph}
+    ports:
+      - "5432:5432"
+    volumes:
+      - devgraph-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devgraph"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/devgraph
+      DB_USERNAME: devgraph
+      DB_PASSWORD: ${DB_PASSWORD:-devgraph}
+      ALLOWED_ORIGINS: http://localhost:5173
+      COOKIE_SECURE: "false"
+      SPRING_PROFILES_ACTIVE: dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  devgraph-postgres-data:

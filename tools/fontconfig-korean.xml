@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>/Users/ai/Library/Fonts</dir>
+  <dir>/Library/Fonts</dir>
+  <dir>/System/Library/Fonts</dir>
+  <dir>/System/Library/Fonts/Supplemental</dir>
+  <dir>/usr/share/fonts</dir>
+  <cachedir>/private/tmp/devgraph-fontconfig-cache</cachedir>
+  <!-- 문서는 Windows Word 기준 "Malgun Gothic"을 선언한다(맑은 고딕은 이 Mac에 없음).
+       QA 렌더링용 LibreOffice가 해당 이름을 실제 설치된 한글 폰트로 찾도록 별칭을 둔다. -->
+  <alias>
+    <family>Malgun Gothic</family>
+    <prefer><family>NanumGothic</family></prefer>
+  </alias>
+  <alias>
+    <family>맑은 고딕</family>
+    <prefer><family>NanumGothic</family></prefer>
+  </alias>
+</fontconfig>

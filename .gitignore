@@ -1,0 +1,7 @@
+# 생성물 — 재생성 가능하므로 커밋하지 않는다.
+qa/
+tools/diagrams/cache/
+.env
+
+# OS
+.DS_Store
