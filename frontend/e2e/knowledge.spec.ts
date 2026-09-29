@@ -28,6 +28,8 @@ test('Concept lifecycle: create, tag, favorite, filter by URL, archive, trash', 
   await page.locator('#body-input').fill('# 개요\n\n필터 체인 기반')
   await page.getByPlaceholder('태그 검색 또는 새로 만들기').fill('spring')
   await page.getByRole('button', { name: /새 태그 만들기/ }).click()
+  // 태그 생성은 비동기다. 선택 목록에 나타난 뒤에 저장해야 태그가 요청에 포함된다.
+  await expect(page.getByLabel('선택한 태그').getByText('spring')).toBeVisible()
   await page.getByRole('button', { name: '저장' }).click()
   await expect(page.getByRole('heading', { name: '개요' })).toBeVisible()
   await expect(page.getByLabel('태그').getByText('spring')).toBeVisible()
@@ -65,6 +67,7 @@ test('Concept lifecycle: create, tag, favorite, filter by URL, archive, trash', 
   await page.getByRole('button', { name: '보관', exact: true }).click()
   await expect(page.getByText('상태: 보관됨')).toBeVisible()
   await page.goto('/library')
+  await expect(page.getByText('회의 메모')).toBeVisible() // 목록이 로드됐음을 먼저 확인
   await expect(page.getByText('Spring Security')).toHaveCount(0)
   await page.goto('/library?status=ARCHIVED')
   await expect(page.getByText('Spring Security')).toBeVisible()

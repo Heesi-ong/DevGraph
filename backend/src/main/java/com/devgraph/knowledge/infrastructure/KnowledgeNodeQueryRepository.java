@@ -20,6 +20,8 @@ import com.devgraph.knowledge.domain.NodeType;
 @Repository
 public class KnowledgeNodeQueryRepository {
 
+	private static final List<NodeType> LIBRARY_TYPES = List.of(NodeType.CONCEPT, NodeType.NOTE);
+
 	@PersistenceContext
 	private EntityManager entityManager;
 
@@ -29,6 +31,9 @@ public class KnowledgeNodeQueryRepository {
 				"select n from KnowledgeNodeJpaEntity n where n.workspaceId = :ws and n.status = :status");
 		if (type != null) {
 			jpql.append(" and n.nodeType = :type");
+		} else {
+			// Library 범위: Snippet은 독립 작업 공간이라 목록에서 제외한다(§8.1). 다른 타입은 해당 Phase에서 정한다.
+			jpql.append(" and n.nodeType in :libraryTypes");
 		}
 		if (tagId != null) {
 			jpql.append(" and exists (select 1 from NodeTagJpaEntity nt where nt.nodeId = n.id and nt.tagId = :tagId)");
@@ -47,6 +52,8 @@ public class KnowledgeNodeQueryRepository {
 				.setParameter("status", status);
 		if (type != null) {
 			query.setParameter("type", type);
+		} else {
+			query.setParameter("libraryTypes", LIBRARY_TYPES);
 		}
 		if (tagId != null) {
 			query.setParameter("tagId", tagId);

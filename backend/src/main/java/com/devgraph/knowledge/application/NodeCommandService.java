@@ -61,10 +61,28 @@ public class NodeCommandService {
 	@Transactional
 	public NodeDetail create(UUID userId, NodeType type, String title, String summary, String bodyMd,
 			List<UUID> tagIds) {
-		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
 		if (type == null || !CREATABLE_TYPES.contains(type)) {
 			throw validation("type", "UNSUPPORTED_TYPE");
 		}
+		return createNode(userId, type, title, summary, bodyMd, tagIds, "NODE_CREATED");
+	}
+
+	/**
+	 * subtype(Snippet 등) 생성의 공통 부분: node 행과 태그만 만든다. subtype 행은 호출한 모듈이 같은
+	 * 트랜잭션에서 추가한다. 일반 `create`가 여는 타입과 별개라 이 경로로는 CONCEPT/NOTE를 만들 수 없다.
+	 */
+	@Transactional
+	public NodeDetail createSubtypeNode(UUID userId, NodeType type, String title, String summary,
+			List<UUID> tagIds, String activityAction) {
+		if (type == null || CREATABLE_TYPES.contains(type)) {
+			throw validation("type", "UNSUPPORTED_TYPE");
+		}
+		return createNode(userId, type, title, summary, null, tagIds, activityAction);
+	}
+
+	private NodeDetail createNode(UUID userId, NodeType type, String title, String summary, String bodyMd,
+			List<UUID> tagIds, String activityAction) {
+		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
 		String cleanTitle = requireTitle(title);
 		String cleanSummary = optionalText("summary", summary, MAX_SUMMARY);
 		String cleanBody = optionalBody(bodyMd);
@@ -76,7 +94,7 @@ public class NodeCommandService {
 		KnowledgeNodeJpaEntity node = nodeRepository.save(new KnowledgeNodeJpaEntity(UUID.randomUUID(), workspaceId,
 				userId, type, cleanTitle, cleanSummary, cleanBody));
 		nodeTagRepository.saveAll(tags.stream().map(t -> new NodeTagJpaEntity(workspaceId, node.getId(), t)).toList());
-		publish(workspaceId, userId, "NODE_CREATED", node.getId());
+		publish(workspaceId, userId, activityAction, node.getId());
 		return assembler.toDetail(workspaceId, userId, node);
 	}
 
@@ -87,8 +105,31 @@ public class NodeCommandService {
 	@Transactional
 	public NodeDetail update(UUID userId, UUID nodeId, Long version, String title, String summary, String bodyMd,
 			List<UUID> tagIds) {
+		return doUpdate(userId, nodeId, version, title, summary, bodyMd, tagIds, false, false, "NODE_UPDATED");
+	}
+
+	/**
+	 * subtype 수정의 공통 부분(제목·요약·태그). subtype 고유 필드만 바뀌어도 node의 version/updatedAt이
+	 * 올라야 하므로 호출자가 `subtypeChanged`로 알린다.
+	 */
+	@Transactional
+	public NodeDetail updateSubtypeNode(UUID userId, UUID nodeId, Long version, String title, String summary,
+			List<UUID> tagIds, boolean subtypeChanged, String activityAction) {
+		return doUpdate(userId, nodeId, version, title, summary, null, tagIds, true, subtypeChanged, activityAction);
+	}
+
+	private NodeDetail doUpdate(UUID userId, UUID nodeId, Long version, String title, String summary, String bodyMd,
+			List<UUID> tagIds, boolean subtype, boolean subtypeChanged, String activityAction) {
 		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
 		KnowledgeNodeJpaEntity node = load(workspaceId, nodeId);
+		boolean nodeIsSubtype = !CREATABLE_TYPES.contains(node.getNodeType());
+		if (subtype && !nodeIsSubtype) {
+			throw new ApiException(HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", "항목을 찾을 수 없습니다.");
+		}
+		if (!subtype && nodeIsSubtype) {
+			// subtype 고유 데이터(예: Snippet 코드 버전)는 전용 API로만 바꾼다. 여기서 우회하면 이력이 어긋난다.
+			throw validation("type", "USE_SUBTYPE_API");
+		}
 		requireVersion(node, version);
 		if (node.getStatus() == NodeStatus.TRASHED) {
 			throw invalidState();
@@ -107,8 +148,12 @@ public class NodeCommandService {
 			node.touch();
 			changed = true;
 		}
+		if (!changed && subtypeChanged) {
+			node.touch();
+			changed = true;
+		}
 		if (changed) {
-			publish(workspaceId, userId, "NODE_UPDATED", node.getId());
+			publish(workspaceId, userId, activityAction, node.getId());
 		}
 		// @Version은 flush 때 증가한다. 응답에 새 version을 담으려면 조립 전에 flush해야 한다.
 		nodeRepository.flush();

@@ -21,6 +21,7 @@ export function AppShell() {
         <nav aria-label="주 메뉴" className="row">
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/library">Library</NavLink>
+          <NavLink to="/snippets">Snippets</NavLink>
         </nav>
         <span className="muted small">
           {user?.displayName} · {workspace?.name ?? '개인 Workspace'}

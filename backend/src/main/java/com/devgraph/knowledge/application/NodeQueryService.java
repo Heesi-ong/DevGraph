@@ -79,11 +79,30 @@ public class NodeQueryService {
 
 	@Transactional(readOnly = true)
 	public NodeDetail get(UUID userId, UUID nodeId) {
+		return getOfType(userId, nodeId, null);
+	}
+
+	/** subtype 상세용. 타입이 다르면 존재 여부를 드러내지 않고 404로 답한다. 조회 기록도 여기서 남긴다. */
+	@Transactional(readOnly = true)
+	public NodeDetail getOfType(UUID userId, UUID nodeId, NodeType requiredType) {
 		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
 		KnowledgeNodeJpaEntity node = nodeRepository.findByIdAndWorkspaceId(nodeId, workspaceId)
+				.filter(n -> requiredType == null || n.getNodeType() == requiredType)
 				.orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "RESOURCE_NOT_FOUND", "항목을 찾을 수 없습니다."));
 		NodeDetail detail = assembler.toDetail(workspaceId, userId, node);
 		viewRecorder.record(workspaceId, userId, nodeId);
 		return detail;
+	}
+
+	/** 다른 모듈이 미리 Workspace 범위로 고른 id 목록을 같은 순서의 NodeSummary로 바꾼다. */
+	@Transactional(readOnly = true)
+	public List<NodeSummary> summariesInOrder(UUID userId, List<UUID> nodeIds) {
+		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
+		java.util.Map<UUID, KnowledgeNodeJpaEntity> byId = new java.util.HashMap<>();
+		nodeRepository.findAllById(nodeIds).stream()
+				.filter(n -> n.getWorkspaceId().equals(workspaceId))
+				.forEach(n -> byId.put(n.getId(), n));
+		List<KnowledgeNodeJpaEntity> ordered = nodeIds.stream().map(byId::get).filter(java.util.Objects::nonNull).toList();
+		return assembler.toSummaries(workspaceId, userId, ordered);
 	}
 }

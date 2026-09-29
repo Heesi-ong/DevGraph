@@ -1,6 +1,6 @@
 # DevGraph 제품·서비스·기술 설계서
 
-> 문서 상태: 기준안 v1.5 (Phase 0~2 구현 결과 반영)  
+> 문서 상태: 기준안 v1.6 (Phase 0~3 구현 결과 반영)  
 > 작성일: 2026-09-28  
 > 대상: Product, UX, Frontend, Backend, QA, 운영 담당 및 구현 에이전트  
 > 문서 목적: 별도 구두 설명 없이 MVP와 1.0 구현을 시작할 수 있는 Source of Truth
@@ -12,6 +12,8 @@
 > **v1.3 변경 요약:** 재인증 저장 모델을 `auth_session_families`(안정 세션 식별자) + `auth_sessions`(rotation 이력) + `reauth_tokens`(family당 1개, purpose 4종)로 확정하고 Access JWT `sid = token_family_id`, family 절대 만료(`absolute_expires_at`, 기본 90일)를 도입(§12.1, §12.3, §17.2), `GET/DELETE /auth/sessions`를 family 기준 API로 재설계(§14.2), Relation 의미 계약을 확정 — 시스템 13종 닫힌 집합 유지, 사용자 정의 Relation을 1.0에서 Growth로 이동(§9.4, §13.2, §18.1, §25, §9.9), Self-loop를 애플리케이션 사전검증(400) + DB CHECK(최종 방어) 이중 구조로 확정하고 `relation_types.allow_self_loop` 같은 예외 컬럼은 추가하지 않기로 결정(PostgreSQL CHECK의 교차 테이블 조회 불가 제약, §12.3), `APPLIED_IN` Source를 Solution 전용으로 정정해 §9.7 체인과의 기존 불일치를 제거, 모든 DB constraint에 명시적 이름 규칙을 도입하고 SQLState+이름 기반 예외 변환을 infrastructure 계층 책임으로 명시(§12.2, §15.2)했다.
 >
 > **v1.4 변경 요약:** Node 영구 삭제 cascade에 누락됐던 `node_views`/`layout_positions`를 추가하고 API의 `HAS_DEPENDENCIES`를 제거해 `TRASHED` 전제조건 + `409 INVALID_NODE_STATE`로 통일(§11.3, §14.3), 계정 탈퇴에 `POST /account/deletion-cancel`과 `DELETION_PENDING` 상태를 추가(§9.1, §14.2), `must_change_password`(§17.8 강제 비밀번호 재설정)와 `DELETION_PENDING`을 Access JWT `restriction` claim 기반의 단일 화이트리스트 필터로 통합(§17.2.3 신설), `users.must_change_password`/`status`, `auth_session_families.device_label` 컬럼 추가와 `revoke_reason`에서 중복이던 `ACCOUNT_DELETED`를 `ACCOUNT_DELETION_REQUESTED`로 단일화(§12.3), 회원가입에서 실사용 계획이 없는 `termsVersion`을 제거(§9.1, §14.2), `POST/GET /relation-types`를 실제 구현 범위(GET은 시스템 13종만, POST는 Growth로 라우트 자체를 만들지 않음)에 맞게 정정(§14.5), reauth 토큰 소비를 조건부 `UPDATE ... RETURNING` 기반 원자적 단일 소비로 명시(§17.2.2), 검색 `search_vector`에서 태그를 제외하고 join 기반 스코어링으로 전환해 벡터 갱신 시점 미결 문제를 제거(§15.4)했다. 세부 근거는 각 절 하단의 결정 사유를 참고한다.
+>
+> **v1.6 변경 요약:** Phase 3(Snippet) 구현 결과를 반영했다. Snippet API의 실제 계약(secret 확인 흐름 `422 SECRET_CONFIRMATION_REQUIRED`, 코드 원문 보존 규칙, 버전 생성 조건, `PATCH /nodes/{id}`의 subtype 우회 차단, Library 목록에서 Snippet 제외, diff endpoint 이월)을 §14.4에, 구현 결과와 이월 항목을 §19에 기록하고, 브라우저 E2E에서 확인된 **refresh 응답 유실 시 세션 family가 폐기되는 문제**를 §17.2에 미결 결정으로 기록했다.
 >
 > **v1.5 변경 요약:** Phase 1~2를 실제로 구현·실행하며 확인된 사실을 반영했다. `csrf_token` 쿠키 Path를 `/api/v1`에서 `/`로 정정(SPA 페이지 경로에서는 `document.cookie`로 읽을 수 없어 refresh가 항상 `403 CSRF_FAILED`가 되는 결함, §17.3), Phase 2 API의 실제 구현 범위와 계약 세부(응답 `version`은 갱신 후 값, `413 PAYLOAD_TOO_LARGE`, 수정 시 `null`=변경 없음, 지원 정렬 등)를 §14.3에 명시, Phase 2 구현 결과와 이월 항목을 §19에 기록했다.
 
@@ -1056,6 +1058,19 @@ Graph 조회 정책:
 
 Clipboard 자체는 Frontend에서 수행한다. usage API 실패가 복사를 실패시켜서는 안 된다.
 
+**Phase 3 구현 범위와 세부 계약(v1.6 확정)**
+
+- Snippet은 `knowledge_nodes(node_type='SNIPPET')`의 subtype이다. 제목·설명(`summary`)·태그·상태·즐겨찾기는 Node 공통 로직을 그대로 쓰므로 **상태 전이와 즐겨찾기는 `/nodes/{id}/archive`·`/trash`·`/favorite` 등 공통 endpoint**를 사용한다(Snippet 전용 endpoint 없음).
+- 응답 모양: `SnippetDetail = {공통 Node 필드, snippet:{language, framework, currentVersionNo, useCount, lastUsedAt, secretScanStatus}, currentVersion:{versionNo, code, changeSummary, createdAt}}`. 목록(`SnippetSummary`)은 코드 원문을 싣지 않는다.
+- **Library와 분리:** `GET /nodes`는 `type` 미지정 시 Concept/Note만 반환하고 Snippet은 제외한다(§8.1: Snippet은 독립 작업 공간). Node 공통 `PATCH /nodes/{id}`로 Snippet을 수정하려 하면 `400 VALIDATION_FAILED(type: USE_SUBTYPE_API)`이고, `POST /nodes`로 `SNIPPET`을 만들 수 없다(`400 UNSUPPORTED_TYPE`). 반대로 Concept/Note id를 `/snippets/{id}`로 조회·수정하면 `404`다.
+- **코드 원문 보존(SNP-03):** 코드는 trim·줄바꿈 정규화 없이 **입력 그대로** 저장·반환한다. 검증: 공백뿐이면 `400`, NUL 문자·짝 없는 surrogate는 `400 INVALID_CHARACTER`(조용히 치환하지 않음), UTF-8 **바이트** 기준 512 KB 초과는 `413 PAYLOAD_TOO_LARGE`(field `code`, `MAX_512KB`). DB CHECK(`octet_length(code) <= 524288`)가 최종 방어선이다. 참고: Monaco 편집기는 줄바꿈을 하나의 EOL로 통일하므로, 줄바꿈이 섞인 코드를 **편집**하면 다수 쪽으로 맞춰진다(읽기·복사는 저장된 원문 그대로).
+- **버전 생성 조건(SNP-05):** `PATCH`의 `code`가 현재 버전과 **SHA-256이 다를 때만** 새 버전(`versionNo+1`)을 만든다. 같은 코드를 다시 보내거나 제목·설명·태그·언어·framework만 바꾸면 버전은 늘지 않는다. 어떤 변경이든 Node의 `version`(낙관적 락)은 오르고, 아무것도 안 바뀌면 오르지 않는다. 동시에 같은 `version`으로 코드를 수정하면 정확히 하나만 성공하고 나머지는 `409 VERSION_CONFLICT`이며 버전 번호는 연속이다(통합 테스트로 검증). 버전 행은 불변이다(Hibernate `@Immutable`, 수정·삭제 경로 없음).
+- `language`는 소문자 `[a-z0-9][a-z0-9+#._-]{0,29}`, `framework`(선택)는 소문자 `[a-z0-9][a-z0-9+#._ -]{0,49}`로 정규화해 저장하며 목록 필터도 같은 정규화를 거친다. `framework`에 빈 문자열을 보내면 지운다(`null`/생략은 변경 없음).
+- **Secret 확인 흐름(SNP-09, §17.5):** 코드가 새로 저장될 때(생성, 코드 변경 시) 서버가 스캔한다(private key, API key 접두어, JWT, 자격 증명 대입(`password=`, `DB_PASSWORD=`, `API_TOKEN=` 등), 계정이 든 접속 문자열). 의심되면 `422 SECRET_CONFIRMATION_REQUIRED`와 `fieldErrors:[{field:"code", reason:"<KIND>@L<줄>"}]`을 반환하고 **아무것도 저장하지 않는다**. 응답·로그에는 종류와 줄 번호만 있고 의심 값은 없다. 재요청에 `secretConfirmation: "CONFIRMED"`를 담으면 저장되고(`secretScanStatus=CONFIRMED_WITH_FINDINGS`), private key는 `"CONFIRMED_HIGH_RISK"`(재확인)여야 통과한다. 코드를 고쳐 secret이 없어지면 `CLEAN`으로 돌아간다. 고엔트로피 문자열 감지는 해시·UUID 오탐이 커서 제외했다. 스캔은 한 줄을 1,024자 창(겹침 256)으로 나눠 수행해, 512 KB 한 줄 입력에서도 정규식 백트래킹이 폭발하지 않는다.
+- 버전 목록은 최신순 cursor 페이지이며 코드 원문 대신 `codeLength`(문자 수)를 준다. 원문은 `GET /snippets/{id}/versions/{no}`.
+- `POST /snippets/{id}/usage`는 `{action:"COPY"}`만 허용(그 외 `400`)하고 `use_count`를 DB에서 원자적으로 증가시킨다. Node `version`은 올리지 않으므로 동시 편집 충돌 원인이 되지 않는다. 이전 버전 원문 복사는 통계에 포함하지 않는다. rate limit은 Phase 7.
+- **제외/이월:** `GET /snippets/{id}/diff`(SNP-07, SHOULD — "초기에는 버전별 원문 조회만" 허용), 요청의 `relations[]`(Phase 4). 알 수 없는 요청 필드는 무시된다.
+
 ### 14.5 Relation/Graph API
 
 | Method / Endpoint | 기능 | Request → Response | 권한 | 주요 오류 |
@@ -1361,6 +1376,7 @@ PostgreSQL RLS는 defense-in-depth로 유효하지만 JPA transaction마다 sess
 - Access JWT: 10~15분, 서명 key rotation 가능한 `kid`, 최소 claim(`sub`, `sid`, issued/expiry)만 포함한다. **`sid` = `auth_session_families.id`**(아래 참고)이며, refresh rotation으로 `auth_sessions.id`가 바뀌어도 `sid`는 로그인부터 로그아웃까지 동일하게 유지된다.
 - Refresh Token: 7~30일 정책, `HttpOnly; Secure; SameSite=Lax/Strict; Path=/api/v1/auth`, DB에는 SHA-256 등 단방향 hash만 저장한다.
 - Rotation: refresh마다 이전 token 폐기, 이미 회전된 token 재사용 시 family 전체 폐기.
+- **미결 결정 — refresh 응답 유실(v1.6, 브라우저 E2E에서 확인):** 서버가 refresh를 처리해 token을 회전했지만 응답(새 쿠키)이 브라우저에 도달하기 전에 페이지 이동·탭 닫기·네트워크 끊김이 발생하면, 브라우저는 이미 회전된 옛 token으로 다음 refresh를 보내 **재사용 감지가 발동하고 정상 사용자의 세션 family가 폐기되어 다시 로그인해야 한다**(재현: 로드 직후 refresh가 진행 중일 때 곧바로 다른 URL로 이동). 현재는 유예 없이 즉시 폐기하는 계약(AUTH-03)을 그대로 구현했다. 보통은 "직전에 회전된 token을 짧은 유예(예: 10초) 안에서만 한 번 더 받아 재발급하고, 유예 이후의 재사용만 폐기"하는 방식으로 완화한다. 이 경우 §17.2의 재사용 감지 강도와 `security_audit_logs` 기록 방식이 바뀌므로 Phase 7(보안 하드닝) 전에 결정한다.
 - Logout/Password change(다른 세션 전체 폐기 선택 시)/탈퇴는 session(family)을 폐기한다.
 - 브라우저 Access Token은 memory에 유지하고 새로고침 시 refresh endpoint로 복구한다.
 - **Access JWT는 무상태다** — family가 방금 폐기되어도 이미 발급된 Access JWT는 자신의 남은 TTL(최대 10~15분)까지는 유효하다. 이 한계를 감수하며, "즉시 차단"이 필요해지면 그때 짧은 revocation deny-list 도입을 검토한다(지금은 만들지 않는다 — 측정된 요구 없이 추가하는 복잡도).
@@ -1597,6 +1613,9 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - DB: snippets, snippet_versions, code trigram index.
 - 테스트: code size/encoding, version concurrency, exact clipboard E2E, dangerous content non-execution.
 - 완료 조건: v1 생성, 코드 수정 시 v2, metadata 수정 시 불필요한 version 미생성, 이전 원문 조회 가능.
+- **구현 결과(v1.6):** 범위를 구현했고 통과한다 — 백엔드 통합 테스트(원문 그대로 왕복(CRLF·탭·이모지), v1→v2 및 메타데이터 변경 시 버전 미생성, 이전 원문 조회, 바이트 기준 512 KB 경계, NUL·잘못된 문자, secret 확인/재확인/재스캔, 동시 수정 시 승자 1명·버전 번호 연속, 동시 복사 카운트 원자성, 필터·cursor, Library 분리, 다른 Workspace 접근, 활동 로그, 위험 문자열의 JSON 전용 응답, §12.3 정합성 SQL), `SecretScanner` 단위 테스트, Playwright E2E(정확한 클립보드 복사, v1/v2와 버전 이력·이전 원문 복사, `<script>`/`onerror` 코드가 텍스트로만 표시되고 실행되지 않음, secret 경고·수정·확인 저장, URL 필터).
+- **구현·검증 중 발견해 수정한 결함:** ① 512 KB 한 줄 입력에서 secret 스캔 정규식이 O(n²)로 폭주해 요청이 멈추던 문제(창 단위 스캔으로 해결, 회귀 테스트 추가), ② `DB_PASSWORD=`처럼 접두어가 붙은 환경변수 형태를 놓치던 문제(`\b`가 `_` 뒤를 경계로 보지 않음), ③ Hibernate 스키마 검증이 `CHAR(64)` 컬럼과 String 매핑 불일치로 기동을 막던 문제. E2E 자체의 결함도 고쳤다: 즉시 통과하는 `toHaveCount(0)` 뒤 곧바로 이동해 진행 중인 refresh를 끊는 경합, 비동기 태그 생성 완료 전에 저장하는 경합.
+- **이월/미정의 항목:** ① refresh 응답 유실 시 family 폐기(§17.2 미결 결정). ② diff endpoint(SNP-07), Snippet의 `relations[]`와 연결 Node 표시(Phase 4), 코드 검색·trigram 사용(Phase 5; 인덱스 `ix_snippet_versions__code_trgm`만 선행 생성, SRCH-02는 현재 버전만 조회 단계에서 제한). ③ 고엔트로피 secret 감지. ④ 사용 통계 rate limit. ⑤ `snippet_versions`의 `pg_trgm` 확장(`CREATE EXTENSION`)은 DB 권한이 필요하다 — 운영 배포 절차(§21.7)에서 확인할 것. ⑥ Monaco/Shiki 번들은 지연 로딩되지만(메인 번들 제외) TypeScript worker가 약 7 MB로 크다 — 필요 시 언어 서비스를 줄인다.
 
 ### Phase 4 — Relation & Knowledge Graph
 

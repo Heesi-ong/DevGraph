@@ -5,6 +5,9 @@ import { DashboardPage } from '../pages/DashboardPage'
 import { LibraryPage } from '../pages/LibraryPage'
 import { NodeDetailPage } from '../pages/NodeDetailPage'
 import { NodeCreatePage, NodeEditPage } from '../pages/NodeFormPages'
+import { SnippetListPage } from '../pages/SnippetListPage'
+import { SnippetDetailPage } from '../pages/SnippetDetailPage'
+import { SnippetCreatePage, SnippetEditPage } from '../pages/SnippetFormPages'
 import { AppShell } from '../widgets/AppShell'
 import { ProtectedRoute } from './ProtectedRoute'
 
@@ -25,6 +28,10 @@ export const router = createBrowserRouter([
       { path: 'nodes/new', element: <NodeCreatePage /> },
       { path: 'nodes/:id', element: <NodeDetailPage /> },
       { path: 'nodes/:id/edit', element: <NodeEditPage /> },
+      { path: 'snippets', element: <SnippetListPage /> },
+      { path: 'snippets/new', element: <SnippetCreatePage /> },
+      { path: 'snippets/:id', element: <SnippetDetailPage /> },
+      { path: 'snippets/:id/edit', element: <SnippetEditPage /> },
     ],
   },
 ])

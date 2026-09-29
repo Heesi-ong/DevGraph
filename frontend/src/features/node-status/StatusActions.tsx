@@ -2,7 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { transitionNode, type NodeTransition } from '../../entities/knowledge-node/api'
 import { nodeKeys } from '../../entities/knowledge-node/queryKeys'
-import type { NodeDetail } from '../../entities/knowledge-node/types'
+import type { NodeStatus } from '../../entities/knowledge-node/types'
+import { snippetKeys } from '../../entities/snippet/queryKeys'
 import { toApiError } from '../../shared/api/errors'
 
 interface Action {
@@ -12,7 +13,7 @@ interface Action {
 }
 
 // 설계서 §11.3 상태 전이. 위험 동작은 Archive → Trash → Permanent Delete 순서다(§10.1).
-const ACTIONS: Record<NodeDetail['status'], Action[]> = {
+const ACTIONS: Record<NodeStatus, Action[]> = {
   ACTIVE: [
     { transition: 'archive', label: '보관' },
     { transition: 'trash', label: '휴지통으로', confirm: '휴지통으로 이동합니다. 30일 뒤 영구 삭제될 수 있습니다.' },
@@ -25,7 +26,8 @@ const ACTIONS: Record<NodeDetail['status'], Action[]> = {
   TRASHED: [{ transition: 'trash/restore', label: '보관함으로 복구' }],
 }
 
-export function StatusActions({ node }: { node: NodeDetail }) {
+// Concept/Note/Snippet 모두 같은 상태 전이 endpoint(/nodes/{id}/...)를 쓴다.
+export function StatusActions({ node }: { node: { id: string; version: number; status: NodeStatus } }) {
   const queryClient = useQueryClient()
   const [message, setMessage] = useState<string | null>(null)
 
@@ -34,6 +36,7 @@ export function StatusActions({ node }: { node: NodeDetail }) {
     onSuccess: async () => {
       setMessage(null)
       await queryClient.invalidateQueries({ queryKey: nodeKeys.all })
+      await queryClient.invalidateQueries({ queryKey: snippetKeys.all })
     },
     onError: async (err) => {
       const info = toApiError(err)
@@ -45,6 +48,7 @@ export function StatusActions({ node }: { node: NodeDetail }) {
             : info.message,
       )
       await queryClient.invalidateQueries({ queryKey: nodeKeys.detail(node.id) })
+      await queryClient.invalidateQueries({ queryKey: snippetKeys.detail(node.id) })
     },
   })
 

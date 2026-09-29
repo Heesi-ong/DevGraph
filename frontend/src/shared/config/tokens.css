@@ -50,3 +50,12 @@ body {
 .chips { list-style: none; padding: 0; display: flex; gap: var(--space-1); flex-wrap: wrap; }
 .conflict { border: 1px solid var(--color-danger); border-radius: 6px; padding: var(--space-3); }
 .pre { white-space: pre-wrap; }
+
+/* Phase 3 Snippet 화면 */
+.code-block { margin: var(--space-2) 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: 6px; overflow: auto; max-height: 70vh; font-family: var(--font-mono); font-size: 0.85rem; white-space: pre; tab-size: 2; }
+.code-block code { font-family: inherit; }
+.code-block span[style] { color: var(--shiki-light); }
+@media (prefers-color-scheme: dark) { .code-block span[style] { color: var(--shiki-dark); } }
+.code-editor { height: 360px; border: 1px solid var(--color-border); border-radius: 6px; }
+.version-list { padding-left: var(--space-4); }
+.check { flex-direction: row !important; align-items: center; gap: var(--space-2); }
