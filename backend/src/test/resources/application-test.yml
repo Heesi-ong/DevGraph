@@ -1,0 +1,5 @@
+devgraph:
+  auth:
+    jwt-signing-key: devgraph-test-signing-key-not-for-production-use
+  cookie:
+    secure: false

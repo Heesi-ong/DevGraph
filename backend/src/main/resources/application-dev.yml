@@ -9,3 +9,6 @@ logging:
 devgraph:
   cookie:
     secure: false
+  auth:
+    # 개발 전용 키. 운영은 JWT_SIGNING_KEY 환경변수로 반드시 덮어써야 한다(application.yml 기본값은 빈 문자열).
+    jwt-signing-key: ${JWT_SIGNING_KEY:devgraph-local-dev-only-signing-key-do-not-use-in-prod}

@@ -7,8 +7,12 @@
 
 ## 현재 상태
 
-Phase 0(기획 및 프로젝트 기본 구조) — 빈 앱 스캐폴딩 단계. 실제 기능(인증, Knowledge, Snippet 등)은
-아직 구현되지 않았다. 다음 Phase는 [설계서 §19 Phase 1](DEVGRAPH_PRODUCT_DESIGN.md)(Authentication).
+Phase 1(Authentication) 구현 완료 — 가입/로그인/refresh rotation(재사용 감지 포함)/logout/session
+목록·폐기, JWT+CSRF, 개인 Workspace 원자 생성까지 동작한다. Knowledge/Snippet 등 실제 기능은 아직
+없다. 다음 Phase는 [설계서 §19 Phase 2](DEVGRAPH_PRODUCT_DESIGN.md)(Knowledge Management).
+
+운영 배포 시 `JWT_SIGNING_KEY` 환경변수를 반드시 설정해야 한다(설정 안 하면 기동 시 예외 발생 —
+개발 프로필만 로컬 전용 기본값을 쓴다).
 
 ## 로컬 실행
 
