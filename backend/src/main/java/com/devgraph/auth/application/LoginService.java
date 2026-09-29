@@ -36,7 +36,7 @@ public class LoginService {
 	}
 
 	@Transactional
-	public AuthResult login(String email, String rawPassword, String ipPrefix) {
+	public AuthResult login(String email, String rawPassword, String deviceLabel, String ipPrefix) {
 		String normalized = email.trim().toLowerCase(Locale.ROOT);
 		Optional<UserJpaEntity> found = userRepository.findByEmailNormalized(normalized);
 		boolean passwordMatches = passwordEncoder.matches(rawPassword,
@@ -48,7 +48,7 @@ public class LoginService {
 		}
 
 		UserJpaEntity user = found.get();
-		IssuedTokens tokens = sessionIssuanceService.issueNewFamily(user.getId(), null, ipPrefix);
+		IssuedTokens tokens = sessionIssuanceService.issueNewFamily(user.getId(), deviceLabel, ipPrefix);
 		securityAuditService.record(user.getId(), "AUTH_LOGIN", "SUCCESS", ipPrefix);
 		return new AuthResult(user.getId(), user.getEmail(), user.getDisplayName(), tokens);
 	}

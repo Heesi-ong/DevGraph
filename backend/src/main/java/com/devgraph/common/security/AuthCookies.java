@@ -34,7 +34,9 @@ public class AuthCookies {
 				.httpOnly(false)
 				.secure(cookieSecure)
 				.sameSite("Lax")
-				.path("/api/v1")
+				// JS(document.cookie)는 현재 '페이지' 경로 기준으로 쿠키를 읽는다. /api/v1로 두면 SPA 페이지에서
+				// 읽지 못해 X-CSRF-Token이 비어 refresh가 항상 403이 된다.
+				.path("/")
 				.maxAge(properties.getRefreshTokenTtl())
 				.build();
 	}

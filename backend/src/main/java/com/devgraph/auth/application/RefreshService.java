@@ -37,7 +37,9 @@ public class RefreshService {
 		this.securityAuditService = securityAuditService;
 	}
 
-	@Transactional
+	// noRollbackFor: 재사용 감지/절대 만료에서는 family를 폐기(변경)한 뒤 ApiException을 던진다. 기본 설정이면
+	// 예외 때문에 트랜잭션이 롤백되어 폐기가 취소되고, 탈취된 family가 계속 살아남는다.
+	@Transactional(noRollbackFor = ApiException.class)
 	public IssuedTokens refresh(String rawRefreshToken, String ipPrefix) {
 		byte[] hash = TokenHasher.sha256(rawRefreshToken);
 		AuthSessionJpaEntity session = sessionRepository.findByRefreshTokenHash(hash).orElse(null);

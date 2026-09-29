@@ -37,7 +37,9 @@ class JwtTokenProviderTest {
 	@Test
 	void tamperedTokenIsRejected() {
 		String token = provider.issueAccessToken(UUID.randomUUID(), UUID.randomUUID(), "NONE");
-		String tampered = token.substring(0, token.length() - 1) + (token.endsWith("A") ? "B" : "A");
+		// 서명 마지막 문자는 base64url 패딩 비트라 바꿔도 값이 같을 수 있다. 서명 중간 문자를 바꾼다.
+		int i = token.length() - 10;
+		String tampered = token.substring(0, i) + (token.charAt(i) == 'A' ? 'B' : 'A') + token.substring(i + 1);
 
 		assertThatThrownBy(() -> provider.parse(tampered))
 				.isInstanceOf(JwtTokenProvider.InvalidTokenException.class);

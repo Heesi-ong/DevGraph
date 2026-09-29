@@ -33,6 +33,7 @@ import com.devgraph.common.error.ApiException;
 import com.devgraph.common.security.AuthCookies;
 import com.devgraph.common.security.AuthenticatedUser;
 import com.devgraph.common.security.TokenHasher;
+import com.devgraph.common.web.DeviceLabelParser;
 import com.devgraph.common.web.IpPrefixExtractor;
 
 /** 설계서 §14.2 Auth API. */
@@ -60,14 +61,15 @@ public class AuthController {
 	@PostMapping("/signup")
 	public ResponseEntity<AuthResponse> signup(@Valid @RequestBody SignupRequest request, HttpServletRequest http) {
 		AuthResult result = signupService.signup(request.email(), request.displayName(), request.password(),
-				IpPrefixExtractor.from(http));
+				DeviceLabelParser.parse(http.getHeader("User-Agent")), IpPrefixExtractor.from(http));
 		return withAuthCookies(HttpStatus.CREATED, result.tokens())
 				.body(new AuthResponse(toUserResponse(result), result.tokens().accessToken()));
 	}
 
 	@PostMapping("/login")
 	public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest http) {
-		AuthResult result = loginService.login(request.email(), request.password(), IpPrefixExtractor.from(http));
+		AuthResult result = loginService.login(request.email(), request.password(),
+				DeviceLabelParser.parse(http.getHeader("User-Agent")), IpPrefixExtractor.from(http));
 		return withAuthCookies(HttpStatus.OK, result.tokens())
 				.body(new AuthResponse(toUserResponse(result), result.tokens().accessToken()));
 	}

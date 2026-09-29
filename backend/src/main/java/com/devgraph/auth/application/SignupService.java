@@ -35,7 +35,8 @@ public class SignupService {
 	}
 
 	@Transactional
-	public AuthResult signup(String email, String displayName, String rawPassword, String ipPrefix) {
+	public AuthResult signup(String email, String displayName, String rawPassword, String deviceLabel,
+			String ipPrefix) {
 		String normalized = email.trim().toLowerCase(Locale.ROOT);
 		if (userRepository.existsByEmailNormalized(normalized)) {
 			// §14.1: 중복 이메일은 일반화된 409. 계정 존재 여부를 세부적으로 노출하지 않는다.
@@ -45,7 +46,7 @@ public class SignupService {
 				passwordEncoder.encode(rawPassword));
 		userRepository.save(user);
 		workspaceProvisioningService.createPersonalWorkspace(user.getId(), displayName);
-		IssuedTokens tokens = sessionIssuanceService.issueNewFamily(user.getId(), null, ipPrefix);
+		IssuedTokens tokens = sessionIssuanceService.issueNewFamily(user.getId(), deviceLabel, ipPrefix);
 		securityAuditService.record(user.getId(), "AUTH_SIGNUP", "SUCCESS", ipPrefix);
 		return new AuthResult(user.getId(), user.getEmail(), user.getDisplayName(), tokens);
 	}

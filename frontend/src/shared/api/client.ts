@@ -44,6 +44,12 @@ apiClient.interceptors.response.use(
     }
 
     config._retried = true
+    // 이 요청이 나간 뒤 다른 요청의 refresh가 이미 끝났다면 새 토큰으로 재시도만 한다.
+    // 다시 refresh하면 이미 회전된 쿠키로 요청해 재사용 감지(§17.2)가 family를 폐기한다.
+    if (accessToken && config.headers.Authorization !== `Bearer ${accessToken}`) {
+      config.headers.Authorization = `Bearer ${accessToken}`
+      return apiClient.request(config)
+    }
     if (!refreshInFlight) {
       // 동적 import: features -> shared 역방향 의존을 피하려고 호출 시점에만 불러온다.
       refreshInFlight = import('../../features/auth/api')

@@ -9,6 +9,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
 import org.springframework.lang.NonNull;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -40,10 +41,7 @@ public class CsrfDoubleSubmitFilter extends OncePerRequestFilter {
 			boolean originOk = origin == null || allowedOrigins.contains(origin);
 			boolean tokenOk = header != null && cookieValue != null && header.equals(cookieValue);
 			if (!originOk || !tokenOk) {
-				response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-				response.setContentType("application/json");
-				response.getWriter().write(
-						"{\"code\":\"CSRF_FAILED\",\"message\":\"CSRF 검증에 실패했습니다.\"}");
+				ApiErrorWriter.write(response, HttpStatus.FORBIDDEN, "CSRF_FAILED", "CSRF 검증에 실패했습니다.");
 				return;
 			}
 		}
