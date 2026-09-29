@@ -15,6 +15,7 @@ import com.devgraph.knowledge.infrastructure.FavoriteRepository;
 import com.devgraph.knowledge.infrastructure.KnowledgeNodeJpaEntity;
 import com.devgraph.knowledge.infrastructure.NodeTagJpaEntity;
 import com.devgraph.knowledge.infrastructure.NodeTagRepository;
+import com.devgraph.relation.application.RelationQueryService;
 import com.devgraph.tag.application.TagService;
 import com.devgraph.tag.application.TagView;
 
@@ -25,12 +26,14 @@ public class NodeAssembler {
 	private final NodeTagRepository nodeTagRepository;
 	private final FavoriteRepository favoriteRepository;
 	private final TagService tagService;
+	private final RelationQueryService relationQueryService;
 
 	public NodeAssembler(NodeTagRepository nodeTagRepository, FavoriteRepository favoriteRepository,
-			TagService tagService) {
+			TagService tagService, RelationQueryService relationQueryService) {
 		this.nodeTagRepository = nodeTagRepository;
 		this.favoriteRepository = favoriteRepository;
 		this.tagService = tagService;
+		this.relationQueryService = relationQueryService;
 	}
 
 	public List<NodeSummary> toSummaries(UUID workspaceId, UUID userId, List<KnowledgeNodeJpaEntity> nodes) {
@@ -49,7 +52,8 @@ public class NodeAssembler {
 		Extras extras = load(workspaceId, userId, List.of(node));
 		return new NodeDetail(node.getId(), node.getNodeType().name(), node.getTitle(), node.getSummary(),
 				node.getBodyMd(), node.getStatus().name(), node.getVersion(), extras.tagsOf(node.getId()),
-				extras.favorites().contains(node.getId()), node.getCreatedAt(), node.getUpdatedAt());
+				extras.favorites().contains(node.getId()), node.getCreatedAt(), node.getUpdatedAt(),
+				relationQueryService.forNode(workspaceId, node.getId()));
 	}
 
 	private Extras load(UUID workspaceId, UUID userId, List<KnowledgeNodeJpaEntity> nodes) {

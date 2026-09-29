@@ -1,6 +1,9 @@
+import type { NodeRelations } from '../relation/types'
 import type { Tag } from '../tag/types'
 
 export type NodeType = 'CONCEPT' | 'NOTE'
+// 서버가 다루는 전체 타입(§11.2). Relation/Graph는 Snippet 등 다른 타입의 Node도 가리킨다.
+export type AnyNodeType = 'CONCEPT' | 'NOTE' | 'SNIPPET' | 'ERROR' | 'SOLUTION' | 'RESOURCE' | 'PROJECT'
 export type NodeStatus = 'ACTIVE' | 'ARCHIVED' | 'TRASHED'
 
 export interface NodeSummary {
@@ -18,6 +21,7 @@ export interface NodeSummary {
 
 export interface NodeDetail extends NodeSummary {
   bodyMd: string | null
+  relations: NodeRelations
 }
 
 // 설계서 §14.7 cursor 목록 공통 구조.

@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { getSnippet, getVersion, listVersions } from '../entities/snippet/api'
 import { snippetKeys } from '../entities/snippet/queryKeys'
 import { CopyCodeButton } from '../features/copy-snippet/CopyCodeButton'
+import { RelatedNodes } from '../features/relations/RelatedNodes'
 import { StatusActions } from '../features/node-status/StatusActions'
 import { FavoriteButton } from '../features/toggle-favorite/FavoriteButton'
 import { ErrorState, LoadingState } from '../shared/ui/StateViews'
@@ -119,6 +120,7 @@ export function SnippetDetailPage() {
         <StatusActions node={snippet} />
       </div>
 
+      <RelatedNodes nodeId={snippet.id} nodeType="SNIPPET" relations={snippet.relations} editable={snippet.status !== 'TRASHED'} />
       <VersionHistory snippetId={snippet.id} language={language} currentVersionNo={currentVersionNo} />
       <p className="muted small">{new Date(snippet.updatedAt).toLocaleString('ko-KR')} 수정</p>
     </article>

@@ -1,3 +1,4 @@
+import type { NodeRelations } from '../relation/types'
 import type { Tag } from '../tag/types'
 import type { NodeStatus, PageResponse } from '../knowledge-node/types'
 
@@ -32,6 +33,7 @@ export interface SnippetDetail {
   updatedAt: string
   snippet: SnippetMeta
   currentVersion: VersionContent
+  relations: NodeRelations
 }
 
 // 목록은 코드 원문을 싣지 않는다.

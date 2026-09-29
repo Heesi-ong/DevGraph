@@ -9,6 +9,8 @@ import jakarta.persistence.TypedQuery;
 
 import org.springframework.stereotype.Repository;
 
+import com.devgraph.common.web.LikeEscape;
+
 /** 태그 자동완성 목록. 조건이 있을 때만 절을 붙여 null 파라미터 타입 추론 문제를 피한다. */
 @Repository
 public class TagQueryRepository {
@@ -21,7 +23,7 @@ public class TagQueryRepository {
 			int limit) {
 		StringBuilder jpql = new StringBuilder("select t from TagJpaEntity t where t.workspaceId = :ws");
 		if (normalizedPrefix != null) {
-			jpql.append(" and t.normalizedName like :prefix escape '\\'");
+			jpql.append(" and t.normalizedName like :prefix escape '!'");
 		}
 		if (afterName != null) {
 			jpql.append(" and (t.normalizedName > :afterName or (t.normalizedName = :afterName and t.id > :afterId))");
@@ -31,16 +33,11 @@ public class TagQueryRepository {
 		TypedQuery<TagJpaEntity> query = entityManager.createQuery(jpql.toString(), TagJpaEntity.class)
 				.setParameter("ws", workspaceId);
 		if (normalizedPrefix != null) {
-			query.setParameter("prefix", escapeLike(normalizedPrefix) + "%");
+			query.setParameter("prefix", LikeEscape.prefix(normalizedPrefix));
 		}
 		if (afterName != null) {
 			query.setParameter("afterName", afterName).setParameter("afterId", afterId);
 		}
 		return query.setMaxResults(limit).getResultList();
-	}
-
-	// 사용자가 입력한 % _ \ 가 와일드카드로 해석되지 않게 한다.
-	private static String escapeLike(String value) {
-		return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
 	}
 }

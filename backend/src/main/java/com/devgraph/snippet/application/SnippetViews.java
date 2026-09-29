@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.devgraph.relation.application.RelationViews.NodeRelations;
 import com.devgraph.tag.application.TagView;
 
 /** 설계서 §14.4/§14.7 Snippet 응답 모양. 공통 Node 필드 + `snippet` 메타 + 현재 버전. */
@@ -21,7 +22,7 @@ public final class SnippetViews {
 
 	public record SnippetDetail(UUID id, String type, String title, String summary, String status, long version,
 			List<TagView> tags, boolean favorite, Instant createdAt, Instant updatedAt, SnippetMeta snippet,
-			VersionContent currentVersion) {
+			VersionContent currentVersion, NodeRelations relations) {
 	}
 
 	/** 목록용. 코드 원문은 싣지 않는다(목록 payload를 키우지 않기 위해). */

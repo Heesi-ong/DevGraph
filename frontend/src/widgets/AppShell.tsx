@@ -22,6 +22,7 @@ export function AppShell() {
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/library">Library</NavLink>
           <NavLink to="/snippets">Snippets</NavLink>
+          <NavLink to="/graph">Graph</NavLink>
         </nav>
         <span className="muted small">
           {user?.displayName} · {workspace?.name ?? '개인 Workspace'}

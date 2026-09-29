@@ -351,7 +351,8 @@ public class SnippetService {
 				new SnippetMeta(snippet.getLanguage(), snippet.getFramework(), snippet.getCurrentVersionNo(),
 						snippet.getUseCount(), snippet.getLastUsedAt(), snippet.getSecretScanStatus()),
 				new VersionContent(shown.getVersionNo(), shown.getCode(), shown.getChangeSummary(),
-						shown.getCreatedAt()));
+						shown.getCreatedAt()),
+				node.relations());
 	}
 
 	private static SnippetSummary summary(NodeSummary node, SnippetJpaEntity snippet) {

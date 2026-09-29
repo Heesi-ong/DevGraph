@@ -28,6 +28,8 @@ export const router = createBrowserRouter([
       { path: 'nodes/new', element: <NodeCreatePage /> },
       { path: 'nodes/:id', element: <NodeDetailPage /> },
       { path: 'nodes/:id/edit', element: <NodeEditPage /> },
+      // React Flow는 크다. Graph 화면에 들어갈 때만 내려받는다(§16.3).
+      { path: 'graph', lazy: async () => ({ Component: (await import('../pages/GraphPage')).GraphPage }) },
       { path: 'snippets', element: <SnippetListPage /> },
       { path: 'snippets/new', element: <SnippetCreatePage /> },
       { path: 'snippets/:id', element: <SnippetDetailPage /> },

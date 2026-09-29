@@ -192,6 +192,27 @@ class KnowledgeApiIntegrationTest extends AbstractIntegrationTest {
 		assertThat(ids(token, "/api/v1/nodes?favorite=true")).isEmpty();
 	}
 
+	@Test
+	void tagSearchTreatsWildcardCharactersLiterally() {
+		String token = signupToken();
+		call(HttpMethod.POST, "/api/v1/tags", token, "{\"name\":\"100%_done\"}");
+		call(HttpMethod.POST, "/api/v1/tags", token, "{\"name\":\"spring\"}");
+		call(HttpMethod.POST, "/api/v1/tags", token, "{\"name\":\"spam!\"}");
+
+		// 접두어 검색에서 % _ ! 는 와일드카드가 아니라 문자 그대로다.
+		assertThat(tagNames(token, "%")).isEmpty();
+		assertThat(tagNames(token, "100%")).containsExactly("100%_done");
+		assertThat(tagNames(token, "100_")).isEmpty();
+		assertThat(tagNames(token, "spam!")).containsExactly("spam!");
+		assertThat(tagNames(token, "sp")).containsExactly("spam!", "spring");
+		assertThat(tagNames(token, "")).hasSize(3);
+	}
+
+	private List<String> tagNames(String token, String q) {
+		String query = java.net.URLEncoder.encode(q, java.nio.charset.StandardCharsets.UTF_8);
+		return JsonPath.read(call(HttpMethod.GET, "/api/v1/tags?q=" + query, token, null).getBody(), "$.items[*].name");
+	}
+
 	// ---- cross-workspace --------------------------------------------------------------------
 
 	@Test
@@ -274,7 +295,7 @@ class KnowledgeApiIntegrationTest extends AbstractIntegrationTest {
 		if (json != null) {
 			headers.setContentType(MediaType.APPLICATION_JSON);
 		}
-		return restTemplate.exchange(baseUrl(path), method, new HttpEntity<>(json, headers), String.class);
+		return restTemplate.exchange(java.net.URI.create(baseUrl(path)), method, new HttpEntity<>(json, headers), String.class);
 	}
 
 	private String signupToken() {

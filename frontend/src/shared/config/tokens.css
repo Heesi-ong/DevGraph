@@ -59,3 +59,24 @@ body {
 .code-editor { height: 360px; border: 1px solid var(--color-border); border-radius: 6px; }
 .version-list { padding-left: var(--space-4); }
 .check { flex-direction: row !important; align-items: center; gap: var(--space-2); }
+
+/* Phase 4 관계·그래프 화면 */
+.relation-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.relation-row { border-left: 3px solid var(--color-border); padding-left: var(--space-2); }
+.relation-picker { border: 1px solid var(--color-border); border-radius: 6px; padding: var(--space-2) var(--space-3); margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.relation-picker label { display: flex; flex-direction: column; gap: var(--space-1); }
+.candidate-list { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.graph-filters { border: 1px solid var(--color-border); border-radius: 6px; display: flex; flex-direction: column; gap: var(--space-2); }
+.graph-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: var(--space-3); margin-top: var(--space-2); }
+@media (max-width: 800px) { .graph-layout { grid-template-columns: 1fr; } }
+.graph-canvas { height: 60vh; min-height: 360px; border: 1px solid var(--color-border); border-radius: 6px; }
+.graph-drawer { border: 1px solid var(--color-border); border-radius: 6px; padding: var(--space-2) var(--space-3); }
+.graph-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.truncation { border: 1px solid var(--color-danger); border-radius: 6px; padding: var(--space-2); }
+.react-flow__node.graph-node { border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; background: var(--color-bg); color: var(--color-fg); }
+.react-flow__node.graph-node--SNIPPET { border-style: dashed; }
+.react-flow__node.graph-node--focus { border: 2px solid var(--color-primary); }
+.react-flow__node.graph-node--archived { opacity: 0.6; }
+.react-flow__node.selected { outline: 2px solid var(--color-primary); }
+.react-flow__edge-textbg { fill: var(--color-bg); }
+.react-flow__edge-text { fill: var(--color-fg); font-size: 11px; }

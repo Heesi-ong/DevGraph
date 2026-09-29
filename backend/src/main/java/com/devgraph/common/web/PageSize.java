@@ -17,8 +17,13 @@ public final class PageSize {
 	}
 
 	public static int resolve(Integer requested) {
+		return resolve(requested, DEFAULT);
+	}
+
+	/** 기본값이 다른 목록(예: Graph)용. 최대값은 같다. */
+	public static int resolve(Integer requested, int defaultSize) {
 		if (requested == null) {
-			return DEFAULT;
+			return defaultSize;
 		}
 		if (requested < 1 || requested > MAX) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "입력값을 확인해 주세요.",

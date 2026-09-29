@@ -5,6 +5,7 @@ import { nodeKeys } from '../entities/knowledge-node/queryKeys'
 import { FavoriteButton } from '../features/toggle-favorite/FavoriteButton'
 import { StatusActions } from '../features/node-status/StatusActions'
 import { ErrorState, LoadingState } from '../shared/ui/StateViews'
+import { RelatedNodes } from '../features/relations/RelatedNodes'
 import { MarkdownView } from '../widgets/MarkdownView'
 
 export function NodeDetailPage() {
@@ -40,6 +41,7 @@ export function NodeDetailPage() {
         {node.status !== 'TRASHED' && <Link to={`/nodes/${node.id}/edit`}>편집</Link>}
         <StatusActions node={node} />
       </div>
+      <RelatedNodes nodeId={node.id} nodeType={node.type} relations={node.relations} editable={node.status !== 'TRASHED'} />
       <p className="muted small">{new Date(node.updatedAt).toLocaleString('ko-KR')} 수정</p>
     </article>
   )

@@ -1,6 +1,6 @@
 # DevGraph 제품·서비스·기술 설계서
 
-> 문서 상태: 기준안 v1.6 (Phase 0~3 구현 결과 반영)  
+> 문서 상태: 기준안 v1.7 (Phase 0~4 구현 결과 반영)  
 > 작성일: 2026-09-28  
 > 대상: Product, UX, Frontend, Backend, QA, 운영 담당 및 구현 에이전트  
 > 문서 목적: 별도 구두 설명 없이 MVP와 1.0 구현을 시작할 수 있는 Source of Truth
@@ -12,6 +12,8 @@
 > **v1.3 변경 요약:** 재인증 저장 모델을 `auth_session_families`(안정 세션 식별자) + `auth_sessions`(rotation 이력) + `reauth_tokens`(family당 1개, purpose 4종)로 확정하고 Access JWT `sid = token_family_id`, family 절대 만료(`absolute_expires_at`, 기본 90일)를 도입(§12.1, §12.3, §17.2), `GET/DELETE /auth/sessions`를 family 기준 API로 재설계(§14.2), Relation 의미 계약을 확정 — 시스템 13종 닫힌 집합 유지, 사용자 정의 Relation을 1.0에서 Growth로 이동(§9.4, §13.2, §18.1, §25, §9.9), Self-loop를 애플리케이션 사전검증(400) + DB CHECK(최종 방어) 이중 구조로 확정하고 `relation_types.allow_self_loop` 같은 예외 컬럼은 추가하지 않기로 결정(PostgreSQL CHECK의 교차 테이블 조회 불가 제약, §12.3), `APPLIED_IN` Source를 Solution 전용으로 정정해 §9.7 체인과의 기존 불일치를 제거, 모든 DB constraint에 명시적 이름 규칙을 도입하고 SQLState+이름 기반 예외 변환을 infrastructure 계층 책임으로 명시(§12.2, §15.2)했다.
 >
 > **v1.4 변경 요약:** Node 영구 삭제 cascade에 누락됐던 `node_views`/`layout_positions`를 추가하고 API의 `HAS_DEPENDENCIES`를 제거해 `TRASHED` 전제조건 + `409 INVALID_NODE_STATE`로 통일(§11.3, §14.3), 계정 탈퇴에 `POST /account/deletion-cancel`과 `DELETION_PENDING` 상태를 추가(§9.1, §14.2), `must_change_password`(§17.8 강제 비밀번호 재설정)와 `DELETION_PENDING`을 Access JWT `restriction` claim 기반의 단일 화이트리스트 필터로 통합(§17.2.3 신설), `users.must_change_password`/`status`, `auth_session_families.device_label` 컬럼 추가와 `revoke_reason`에서 중복이던 `ACCOUNT_DELETED`를 `ACCOUNT_DELETION_REQUESTED`로 단일화(§12.3), 회원가입에서 실사용 계획이 없는 `termsVersion`을 제거(§9.1, §14.2), `POST/GET /relation-types`를 실제 구현 범위(GET은 시스템 13종만, POST는 Growth로 라우트 자체를 만들지 않음)에 맞게 정정(§14.5), reauth 토큰 소비를 조건부 `UPDATE ... RETURNING` 기반 원자적 단일 소비로 명시(§17.2.2), 검색 `search_vector`에서 태그를 제외하고 join 기반 스코어링으로 전환해 벡터 갱신 시점 미결 문제를 제거(§15.4)했다. 세부 근거는 각 절 하단의 결정 사유를 참고한다.
+>
+> **v1.7 변경 요약:** Phase 4(Relation & Graph) 구현 결과를 반영했다. Relation 검증 순서·오류 코드, 대칭 관계의 응답 정규화, `GET /relations/target-candidates`(Relation Picker용 보조 endpoint), Node 상세의 `relations`, Graph focus의 BFS·상한·확장 후보, Workspace Graph의 페이지 경계 edge 한계를 §14.5에, 구현 결과와 이월 항목을 §19에 기록했다. 테스트 중 확인된 사실로 `LIKE` 검색의 와일드카드 이스케이프 공통화(§15.2)를 남겼다.
 >
 > **v1.6 변경 요약:** Phase 3(Snippet) 구현 결과를 반영했다. Snippet API의 실제 계약(secret 확인 흐름 `422 SECRET_CONFIRMATION_REQUIRED`, 코드 원문 보존 규칙, 버전 생성 조건, `PATCH /nodes/{id}`의 subtype 우회 차단, Library 목록에서 Snippet 제외, diff endpoint 이월)을 §14.4에, 구현 결과와 이월 항목을 §19에 기록하고, 브라우저 E2E에서 확인된 **refresh 응답 유실 시 세션 family가 폐기되는 문제**를 §17.2에 미결 결정으로 기록했다.
 >
@@ -1103,6 +1105,17 @@ Clipboard 자체는 Frontend에서 수행한다. usage API 실패가 복사를 �
 
 `/graph/workspace` 응답의 `cursor`는 Node pagination 커서이며 `nextExpansionCandidates`는 사용하지 않는다(traversal이 아니므로 항상 `[]`). `/graph/focus`는 반대로 `cursor` 없이 `nextExpansionCandidates`로 확장을 안내한다.
 
+**Phase 4 구현 범위와 세부 계약(v1.7 확정)**
+
+- **Relation 검증 순서와 오류:** self-loop(`400 SELF_RELATION_NOT_ALLOWED`) → 관계 타입(`400 INVALID_RELATION_TYPE`) → 두 Node가 같은 Workspace에 존재(`400 INVALID_RELATION_NODE` — 다른 Workspace id는 없음과 구분되지 않는다) → 휴지통 Node 금지(`409 INVALID_NODE_STATE`) → §13.1.1 허용 조합(`400 TYPE_NOT_ALLOWED`) → 중복(`409 DUPLICATE_RELATION`, `fieldErrors:[{field:"relationId", reason:"<기존 id>"}]`로 기존 관계를 알려 준다). 동시 요청 경합은 DB UNIQUE/CHECK가 막고, constraint 이름 기반 변환은 infrastructure의 `RelationStore`가 맡는다. `note`는 최대 500자.
+- **`PATCH /relations/{id}`:** `relationTypeId`/`note` 중 보낸 것만 바꾼다(`null`/생략은 변경 없음, 빈 메모 문자열은 지움). 타입을 바꾸면 같은 허용 조합·중복 규칙이 적용되고, 방향성 → 대칭으로 바꾸면 canonical 순서로 저장 방향이 정리된다. 아무것도 바뀌지 않으면 `updated_at`도 바꾸지 않는다. 휴지통 Node가 낀 관계는 수정할 수 없고(`409`), 삭제는 언제나 가능하다. 낙관적 락 `version`은 없다(마지막 쓰기가 이기며 UNIQUE가 무결성을 지킨다).
+- **`GET /relation-types`:** 활성 시스템 13종(+ 해당 Workspace의 사용자 타입, 현재는 없음). 허용 Source/Target 조합은 이 응답의 `allowedSourceTypes`/`allowedTargetTypes`이며 화면이 선택지를 미리 거르는 데 쓴다. `POST /relation-types` 라우트는 없다.
+- **보조 endpoint `GET /relations/target-candidates?nodeId&relationTypeId&side=OUTGOING|INCOMING&q`(Relation Picker용, 표에 없던 추가):** 그 타입·방향에서 허용되는 타입의 Node 중 **아직 연결되지 않은** 것만(대칭 타입은 양방향 기준), 휴지통·자기 자신 제외, 제목 부분 일치(대소문자 무시, `%` `_`는 문자 그대로), 최근 수정 순 최대 20건. 이 Node의 타입이 그 방향으로 허용되지 않으면 빈 목록. 통합 검색(Phase 5) 이전의 최소 기능이다.
+- **Node 상세의 `relations`:** `GET /nodes/{id}`, `GET /snippets/{id}`(및 생성·수정 응답)는 `relations:{outgoing[], incoming[], truncated}`를 포함한다. 각 항목은 `{id, relationTypeId, type, label, nodeId, nodeTitle, nodeType, nodeStatus, note}`이며 `label`은 이 Node 기준으로 forward/inverse가 이미 골라져 있다. **대칭 타입은 저장 방향과 무관하게 항상 `outgoing`에 담고** 상대 Node를 `nodeId`로 준다(§13.1.2의 canonical 저장을 화면이 알 필요가 없다). 휴지통 Node와 이어진 관계는 제외한다. 한 Node에 싣는 관계는 최대 200건이며 넘으면 `truncated=true`로 알린다.
+- **`GET /graph/focus/{nodeId}`:** `depth`(기본 1, 1~3, 3 초과는 `400 LIMIT_EXCEEDED`, 1 미만은 `400`), `maxNodes`(기본 200, 최대 500, 초과는 `400 LIMIT_EXCEEDED`), `nodeTypes`/`relationTypes`(콤마 구분 목록, 모르는 관계 key는 `400`), `archived`(기본 false, true면 보관 Node 포함; 휴지통은 항상 제외). 중심 Node가 없거나 휴지통이면 `404`. **낮은 depth부터 BFS**로 확장하고 같은 depth에서는 `updatedAt DESC, id ASC` 순으로 담아 잘림 지점이 결정적이다. visited 집합으로 cycle에서도 종료하며 여러 경로로 닿는 Node는 가장 낮은 depth로 한 번만 담는다(응답의 `depth` 필드). `nodeTypes` 필터는 중심 Node 자신에는 적용하지 않는다. edge는 담긴 Node **사이**의 것만이며 상한은 `min(1500, 3×maxNodes)`(`limits.maxEdges`)다. 상한에 닿으면 `truncated=true` + `truncationReason`(`MAX_NODES` 또는 `MAX_EDGES`)이고, 상한 때문에 빠진 Node와 요청 depth 바로 다음 단계의 Node를 최대 20개까지 `nextExpansionCandidates`로 준다. `MAX_DEPTH`는 사용하지 않는다(depth 초과는 잘림이 아니라 400이다).
+- **`GET /graph/workspace`:** Node 목록 pagination이다(기본 `size` 50, 최대 100, `GET /nodes`와 같은 cursor 규약). `tag`, `nodeTypes`, `relationTypes`, `archived` 필터를 traversal 이후가 아니라 조회 조건에 넣는다. edge는 **이번 페이지의 Node 사이만** 반환하므로 페이지를 넘나드는 edge는 보이지 않는다(화면은 첫 페이지만 사용한다). edge가 1,500개를 넘으면 `truncated=true, MAX_EDGES`.
+- **제외/이월:** `PUT /graph/layout`과 `layout_positions` 테이블(GRPH-06, SHOULD), Graph 필터의 Project scope(GRPH-04 — Project는 Phase 6), 사용자 정의 Relation(Growth).
+
 ### 14.6 Search, Project, Problem, Data API
 
 | Method / Endpoint | 기능 | Request → Response | 권한 | 주요 오류 |
@@ -1250,6 +1263,8 @@ knowledge/
 - 다른 모듈의 JPA entity/repository에 직접 접근하지 않고 공개 application service 또는 명시적 query facade를 호출한다.
 - cross-module transaction이 필요한 생성 흐름(예: Snippet + Version + Relation)은 orchestration service가 transaction boundary를 가진다.
 - DB 제약 위반(SQLState + constraint 이름)을 API 오류로 바꾸는 예외 변환은 **infrastructure 계층**의 책임이다(서비스 계층에 흩어놓지 않는다). Flyway가 붙인 명시적 constraint 이름(§12.2)에 의존하므로, JPA 자동 생성 이름을 쓰는 schema에서는 이 매핑이 깨진다 — `ddl-auto=validate`(§15.5)와 짝을 이루는 규칙이다. 매핑 예시는 §12.3 `knowledge_relations`를 참고한다.
+- **모듈 의존 방향(v1.7, Phase 4에서 확정):** `knowledge → relation`(Node 상세가 관계를 싣는다), `snippet → knowledge`, `relation`과 `graph`는 다른 모듈의 Java 클래스를 import하지 않고 Node/Relation 엔티티를 **JPQL 엔티티 이름으로만** 읽는다(`knowledge.domain`의 `NodeType`/`NodeStatus` enum만 공유 어휘로 쓴다). 그렇지 않으면 knowledge ↔ relation이 순환 의존이 된다. 이 방식의 대가는 엔티티 이름을 바꿔도 컴파일러가 알려 주지 않는다는 것이므로, 해당 쿼리들은 통합 테스트가 직접 실행해 검증한다.
+- **LIKE 검색의 와일드카드:** 사용자 입력의 `%` `_`는 공용 `LikeEscape`(이스케이프 문자 `!`, 쿼리에 `escape '!'`)를 거친다. 태그 검색과 Relation Picker 후보 검색이 쓰며, 와일드카드가 문자 그대로 검색되는지는 통합 테스트가 확인한다.
 - 일반 `activity_logs`는 domain event를 `AFTER_COMMIT`에 받아 기록하되, 핵심 저장 성공을 활동 로그 실패가 되돌리지 않게 한다(유실 허용).
 - 반면 `security_audit_logs`(로그인 실패, 세션 폐기, refresh 재사용 감지 등)는 `AFTER_COMMIT` 유실을 허용하지 않는다. 원 동작의 트랜잭션이 rollback되더라도 감사 기록은 남아야 하므로 **별도 `REQUIRES_NEW` transaction**으로 즉시 커밋한다(§12.3). 원 트랜잭션과 같은 트랜잭션에 묶지 않는다 — 그러면 rollback 시 감사 로그도 함께 사라진다.
 
@@ -1625,6 +1640,9 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - DB: relation_types, knowledge_relations, graph indexes, 선택 시 layout_positions.
 - 테스트: duplicate/self/cross-workspace edge, cycle traversal, depth/limit, keyboard graph alternative.
 - 완료 조건: 학습 시나리오가 전체 동작하고 cycle graph에서도 응답 상한을 지킨다.
+- **구현 결과(v1.7):** 범위를 구현했고 통과한다 — 백엔드 통합 테스트(시스템 13종 seed와 허용 조합, 양쪽 상세의 outgoing/backlink, self·중복·타입·교차 Workspace·휴지통 거부, 대칭 canonical 저장과 반대 방향 재요청 409, 동시 동일 요청 시 정확히 1건 생성, 수정·삭제·활동 로그, Picker 후보(허용 타입·기존 연결 제외·와일드카드), BFS depth와 최소 depth, cycle 종료, 노드 상한 잘림의 결정성과 확장 후보, 60개 노드·3,540 edge에서도 edge 1,500 상한, 한 Node 관계 200건 상한, 필터, Workspace Graph pagination, DB 제약 최종 방어), Playwright E2E(Snippet↔Concept 연결·backlink·타입 변경·삭제, 그래프 depth·필터의 URL 유지, 노드 클릭 drawer, 키보드로 쓰는 목록 대안, cycle, 보관 항목 포함 여부).
+- **구현·검증 중 발견해 수정한 결함:** ① 관계를 바꿔도 Relation Picker의 후보 캐시가 무효화되지 않아 이미 연결한 항목이 후보에 남던 문제(관계 변경 시 후보 캐시도 함께 무효화), ② 사용자 입력의 `%` `_`를 다루는 LIKE 검색이 태그 검색과 Picker에 각각 흩어져 있던 것을 공용 `LikeEscape`로 통합하고 태그 검색에 와일드카드 회귀 테스트 추가. E2E 자체의 결함도 고쳤다: 부분 일치 로케이터, 라우터 갱신이 늦는 체크박스 검사.
+- **이월/미정의 항목:** ① `PUT /graph/layout`·`layout_positions`(GRPH-06, SHOULD)와 Graph의 Project scope 필터(Phase 6). ② Workspace Graph는 첫 페이지(최근 수정 100개)만 화면에 쓰고 페이지를 넘나드는 edge는 표시되지 않는다 — 전체 구조 탐색은 focus 그래프를 쓴다. ③ 중심 Graph의 `maxNodes`는 API 파라미터이며 화면에는 노출하지 않았다(기본 200). ④ focus BFS는 recursive CTE 대신 depth당 쿼리 1회(최대 4회)인 애플리케이션 BFS다 — depth 상한을 늘리거나 경로 질의가 필요해지면 CTE로 바꾼다. ⑤ Relation Picker의 제목 검색은 부분 일치 최소 기능이며 통합 검색(Phase 5)이 대체한다. ⑥ Error/Solution/Project/Resource 화면이 없어 그 타입의 관계 링크는 `/nodes/{id}` 상세로 연결된다(Phase 6). ⑦ 그래프 접근성은 목록 대안과 노드 focus/`aria-label`까지이며, 스크린리더 실사용 검증은 하지 않았다.
 
 ### Phase 5 — Search
 
