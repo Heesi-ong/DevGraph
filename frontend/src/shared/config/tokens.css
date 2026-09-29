@@ -31,3 +31,22 @@ body {
   color: var(--color-fg);
   font-family: var(--font-sans);
 }
+
+/* Phase 2 화면 공통 스타일 */
+.shell-header { display: flex; gap: var(--space-3); align-items: center; padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border); }
+.shell-header nav { flex: 1; }
+.shell-main { max-width: 860px; margin: 0 auto; padding: var(--space-4); }
+.row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.form { display: flex; flex-direction: column; gap: var(--space-3); }
+.form label { display: flex; flex-direction: column; gap: var(--space-1); }
+.muted { color: var(--color-muted); }
+.small { font-size: 0.8rem; }
+.error-text { color: var(--color-danger); }
+.state-view { padding: var(--space-3); text-align: center; }
+.node-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.node-card { border: 1px solid var(--color-border); border-radius: 6px; padding: var(--space-2) var(--space-3); }
+.node-title { font-weight: 600; flex: 1; }
+.badge, .chip { border: 1px solid var(--color-border); border-radius: 999px; padding: 0 var(--space-2); font-size: 0.75rem; }
+.chips { list-style: none; padding: 0; display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.conflict { border: 1px solid var(--color-danger); border-radius: 6px; padding: var(--space-3); }
+.pre { white-space: pre-wrap; }

@@ -28,6 +28,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5'
 	implementation 'org.flywaydb:flyway-database-postgresql'
+	// Argon2PasswordEncoder(§17.2)가 런타임에 BouncyCastle을 요구한다. 컴파일 타임에는 드러나지 않는다.
+	implementation 'org.bouncycastle:bcprov-jdk18on:1.80'
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'
@@ -40,6 +42,7 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-starter-validation-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testImplementation 'org.springframework.boot:spring-boot-resttestclient'
+	testImplementation 'org.springframework.boot:spring-boot-restclient'
 	// §20.1 Repository/Integration: Testcontainers PostgreSQL. H2 대체 금지.
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:junit-jupiter:1.21.3'
@@ -49,4 +52,8 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// Docker 없는 환경에서 외부 PostgreSQL을 쓰기 위한 통로(AbstractIntegrationTest 참고).
+	['devgraph.test.jdbc-url', 'devgraph.test.jdbc-user', 'devgraph.test.jdbc-password'].each { key ->
+		System.getProperty(key)?.with { systemProperty key, it }
+	}
 }
