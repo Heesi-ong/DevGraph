@@ -1,6 +1,6 @@
 # DevGraph 제품·서비스·기술 설계서
 
-> 문서 상태: 기준안 v1.4 (구현 착수 전 최종 계약 확정)  
+> 문서 상태: 기준안 v1.5 (Phase 0~2 구현 결과 반영)  
 > 작성일: 2026-09-28  
 > 대상: Product, UX, Frontend, Backend, QA, 운영 담당 및 구현 에이전트  
 > 문서 목적: 별도 구두 설명 없이 MVP와 1.0 구현을 시작할 수 있는 Source of Truth
@@ -12,6 +12,8 @@
 > **v1.3 변경 요약:** 재인증 저장 모델을 `auth_session_families`(안정 세션 식별자) + `auth_sessions`(rotation 이력) + `reauth_tokens`(family당 1개, purpose 4종)로 확정하고 Access JWT `sid = token_family_id`, family 절대 만료(`absolute_expires_at`, 기본 90일)를 도입(§12.1, §12.3, §17.2), `GET/DELETE /auth/sessions`를 family 기준 API로 재설계(§14.2), Relation 의미 계약을 확정 — 시스템 13종 닫힌 집합 유지, 사용자 정의 Relation을 1.0에서 Growth로 이동(§9.4, §13.2, §18.1, §25, §9.9), Self-loop를 애플리케이션 사전검증(400) + DB CHECK(최종 방어) 이중 구조로 확정하고 `relation_types.allow_self_loop` 같은 예외 컬럼은 추가하지 않기로 결정(PostgreSQL CHECK의 교차 테이블 조회 불가 제약, §12.3), `APPLIED_IN` Source를 Solution 전용으로 정정해 §9.7 체인과의 기존 불일치를 제거, 모든 DB constraint에 명시적 이름 규칙을 도입하고 SQLState+이름 기반 예외 변환을 infrastructure 계층 책임으로 명시(§12.2, §15.2)했다.
 >
 > **v1.4 변경 요약:** Node 영구 삭제 cascade에 누락됐던 `node_views`/`layout_positions`를 추가하고 API의 `HAS_DEPENDENCIES`를 제거해 `TRASHED` 전제조건 + `409 INVALID_NODE_STATE`로 통일(§11.3, §14.3), 계정 탈퇴에 `POST /account/deletion-cancel`과 `DELETION_PENDING` 상태를 추가(§9.1, §14.2), `must_change_password`(§17.8 강제 비밀번호 재설정)와 `DELETION_PENDING`을 Access JWT `restriction` claim 기반의 단일 화이트리스트 필터로 통합(§17.2.3 신설), `users.must_change_password`/`status`, `auth_session_families.device_label` 컬럼 추가와 `revoke_reason`에서 중복이던 `ACCOUNT_DELETED`를 `ACCOUNT_DELETION_REQUESTED`로 단일화(§12.3), 회원가입에서 실사용 계획이 없는 `termsVersion`을 제거(§9.1, §14.2), `POST/GET /relation-types`를 실제 구현 범위(GET은 시스템 13종만, POST는 Growth로 라우트 자체를 만들지 않음)에 맞게 정정(§14.5), reauth 토큰 소비를 조건부 `UPDATE ... RETURNING` 기반 원자적 단일 소비로 명시(§17.2.2), 검색 `search_vector`에서 태그를 제외하고 join 기반 스코어링으로 전환해 벡터 갱신 시점 미결 문제를 제거(§15.4)했다. 세부 근거는 각 절 하단의 결정 사유를 참고한다.
+>
+> **v1.5 변경 요약:** Phase 1~2를 실제로 구현·실행하며 확인된 사실을 반영했다. `csrf_token` 쿠키 Path를 `/api/v1`에서 `/`로 정정(SPA 페이지 경로에서는 `document.cookie`로 읽을 수 없어 refresh가 항상 `403 CSRF_FAILED`가 되는 결함, §17.3), Phase 2 API의 실제 구현 범위와 계약 세부(응답 `version`은 갱신 후 값, `413 PAYLOAD_TOO_LARGE`, 수정 시 `null`=변경 없음, 지원 정렬 등)를 §14.3에 명시, Phase 2 구현 결과와 이월 항목을 §19에 기록했다.
 
 ---
 
@@ -1026,6 +1028,17 @@ Graph 조회 정책:
 | `POST /tags` | 태그 생성 | `{name,color}` → `201 Tag` | Member | 409 TAG_EXISTS |
 | `PATCH /tags/{id}` | 이름/색 수정 | `{name,color}` → `Tag` | Member | 409 |
 
+**Phase 2 구현 범위와 세부 계약(v1.5 확정)**
+
+- `POST /nodes`는 Phase 2에서 `type`이 `CONCEPT`/`NOTE`일 때만 허용하며, 다른 타입은 `400 UNSUPPORTED_TYPE`이다(Snippet은 Phase 3, 나머지는 Phase 6). 요청의 `relations[]`는 Phase 4 전까지 받지 않는다.
+- 검증: `title` 1~200자, `summary` 최대 1,000자, `bodyMd` 최대 1,000,000바이트(초과 시 `413 PAYLOAD_TOO_LARGE`), NUL 문자 거부, 실패는 `400 VALIDATION_FAILED` + `fieldErrors`.
+- `PATCH /nodes/{id}`: 요청에 없거나 `null`인 필드는 변경하지 않는다. 실제 변경이 없으면 `version`을 올리지 않는다. `TRASHED` Node 수정은 `409 INVALID_NODE_STATE`. 응답의 `version`은 **갱신 후 값**이며, 클라이언트는 이 값을 다음 요청에 사용한다.
+- 상태 전이 endpoint는 모두 `version`을 요구한다. 허용되지 않은 전이는 `409 INVALID_NODE_STATE`, `version` 불일치는 `409 VERSION_CONFLICT`다.
+- `GET /nodes`: `status` 미지정 시 `ACTIVE`만 반환한다. 정렬은 `updatedAt DESC, id ASC` 하나이며 `sort`에 다른 값을 주면 `400`이다. cursor는 opaque(마이크로초 단위 `updatedAt` + `id`)이고 잘못된 값은 `400 INVALID_CURSOR`, `size`가 1~100을 벗어나면 `400`이다.
+- 다른 Workspace의 Node/Tag id는 존재 여부를 숨기기 위해 `404`(Node) 또는 `400`(요청 본문의 `tagIds` 참조)로 응답한다.
+- 태그 이름은 앞뒤 공백 제거, 연속 공백 축소, 소문자 정규화 값으로 Workspace 내 유일성을 판정한다(대소문자만 다른 이름은 `409 TAG_EXISTS`).
+- `POST /nodes/{id}/permanent-delete`는 재인증(§17.2.2)에 의존하므로 Phase 2에서 구현하지 않고 Phase 7로 이월한다. `NodeDetail`의 관계 정보와 backlink도 Phase 4에서 추가한다.
+
 `NodeDetail`은 subtype에 따라 `snippet`, `error`, `solution`, `project`, `resource` object 중 하나를 포함한다. 관계는 `outgoing`과 `incoming`으로 나누거나 공통 배열에 `displayDirection`을 함께 반환한다.
 
 ### 14.4 Snippet API
@@ -1434,9 +1447,10 @@ RETURNING id;
 
 CSRF 방식은 **double-submit cookie**로 확정한다(다른 방식은 채택하지 않는다).
 
-- 로그인/refresh 성공 시 서버가 `HttpOnly`가 아닌 `csrf_token` 쿠키(`Secure; SameSite=Lax; Path=/api/v1`)를 함께 발급한다.
+- 로그인/refresh 성공 시 서버가 `HttpOnly`가 아닌 `csrf_token` 쿠키(`Secure; SameSite=Lax; Path=/`)를 함께 발급한다.
 - Frontend는 이 쿠키 값을 읽어 refresh/logout/account-deletion 같은 cookie 인증 mutation 요청에 `X-CSRF-Token` header로 동봉한다.
 - 서버는 header 값과 쿠키 값이 일치하는지, 그리고 Origin/Referer가 `ALLOWED_ORIGINS`(§21.2)에 있는지를 함께 검증한다. 둘 중 하나라도 실패하면 `403 CSRF_FAILED`.
+- `csrf_token`의 `Path`는 반드시 `/`다. 브라우저의 `document.cookie`는 API 경로가 아니라 **현재 페이지 경로** 기준으로 쿠키를 노출하므로 `/api/v1`로 제한하면 SPA 화면에서 값을 읽을 수 없다(구현 중 발견한 결함). refresh token 쿠키는 `HttpOnly`이므로 `Path=/api/v1/auth`를 유지한다.
 - `csrf_token`은 refresh token과 함께 회전한다(매 refresh마다 재발급). 최초 발급/회전/검증 로직은 `common/security` 모듈에 단일 구현으로 둔다.
 - Markdown은 raw HTML을 기본 금지하고 allowlist sanitizer를 거쳐 렌더링한다.
 - React의 escaping을 우회하는 `dangerouslySetInnerHTML`은 sanitizer 출력 외 사용 금지다.
@@ -1572,6 +1586,8 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - DB: knowledge_nodes, tags, node_tags, favorites, node_views, activity_logs.
 - 테스트: validation, pagination, version conflict, archive visibility, cross-workspace access.
 - 완료 조건: Concept/Note lifecycle과 URL 기반 필터가 E2E로 통과한다.
+- **구현 결과(v1.5):** 위 범위를 모두 구현했고 백엔드 통합 테스트(validation, pagination, version conflict, archive visibility, cross-workspace, 활동 로그·최근 조회 기록, 상태 전이)와 Playwright E2E(생명주기, URL 필터 새로고침 유지, 편집 충돌 처리, 비로그인 리다이렉트)가 통과한다. 구현·검증 중 발견해 수정한 결함: 응답 `version` 미갱신(flush 전 조립), `csrf_token` 쿠키 Path(§17.3), refresh 중복 호출 방어.
+- **이월/미정의 항목:** ① Dashboard의 Recent/Favorites는 `GET /nodes`(수정일 순, `favorite=true`)로 대체했다. 최근 **조회** 목록 API와 Activity Summary 조회 API는 아직 정의하지 않았으며(`node_views`, `activity_logs`는 기록만 함), Phase 5 이전에 §14에 계약을 추가해야 한다. ② 영구 삭제·purge·재인증 API는 Phase 7. ③ Node 타입 변경, backlink, `NodeDetail` 관계 정보는 Phase 4. ④ `search_vector`/GIN은 Phase 5에서 추가한다. ⑤ V2~V4 migration의 constraint는 §12.2 명명 규칙 이전에 작성되어 이름이 규칙과 다르다(V5 이후는 준수). ⑥ 통합 테스트 베이스는 기본이 Testcontainers이며 Docker가 없으면 `-Ddevgraph.test.jdbc-url`로 외부 PostgreSQL을 지정한다.
 
 ### Phase 3 — Snippet Management
 
