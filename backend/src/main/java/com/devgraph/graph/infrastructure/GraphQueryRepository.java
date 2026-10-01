@@ -1,6 +1,7 @@
 package com.devgraph.graph.infrastructure;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
@@ -10,6 +11,8 @@ import jakarta.persistence.PersistenceContext;
 import jakarta.persistence.Query;
 
 import org.springframework.stereotype.Repository;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import com.devgraph.knowledge.domain.NodeStatus;
 import com.devgraph.knowledge.domain.NodeType;
@@ -33,6 +36,11 @@ public class GraphQueryRepository {
 
 	@PersistenceContext
 	private EntityManager entityManager;
+	private final NamedParameterJdbcTemplate jdbc;
+
+	public GraphQueryRepository(NamedParameterJdbcTemplate jdbc) {
+		this.jdbc = jdbc;
+	}
 
 	public NodeRow findNode(UUID workspaceId, UUID nodeId) {
 		@SuppressWarnings("unchecked")
@@ -45,34 +53,41 @@ public class GraphQueryRepository {
 
 	/** 낮은 depth부터 BFS하기 위한 한 단계 확장. 정렬은 `updatedAt DESC, id ASC`로 잘림 지점을 결정적으로 만든다. */
 	public List<NeighborRow> neighbors(UUID workspaceId, Collection<UUID> frontier, Collection<NodeStatus> statuses,
-			Collection<NodeType> nodeTypes, Collection<String> relationKeys, int limit) {
-		StringBuilder jpql = new StringBuilder("""
-				select o.id, o.nodeType, o.status, o.title, o.updatedAt, r.sourceNodeId, r.targetNodeId, t.key
-				from RelationJpaEntity r, RelationTypeJpaEntity t, KnowledgeNodeJpaEntity o
-				where r.workspaceId = :ws and o.workspaceId = :ws and r.relationTypeId = t.id
-				  and ((r.sourceNodeId in :frontier and o.id = r.targetNodeId)
-				    or (r.targetNodeId in :frontier and o.id = r.sourceNodeId))
-				  and o.status in :statuses""");
+			Collection<NodeType> nodeTypes, Collection<String> relationKeys, Collection<UUID> visited, int limit) {
+		// 먼저 Node별 대표 edge를 고른 뒤 limit한다. 중복 edge가 조회 상한을 소모하지 않게 한다.
+		StringBuilder sql = new StringBuilder("""
+				WITH ranked AS (
+				  SELECT o.id, o.node_type, o.status, o.title, o.updated_at,
+				         r.source_node_id, r.target_node_id, t.key,
+				         row_number() OVER (PARTITION BY o.id ORDER BY r.id ASC) AS rn
+				  FROM knowledge_relations r
+				  JOIN relation_types t ON t.id = r.relation_type_id
+				  JOIN knowledge_nodes o ON o.workspace_id = r.workspace_id
+				    AND ((r.source_node_id IN (:frontier) AND o.id = r.target_node_id)
+				      OR (r.target_node_id IN (:frontier) AND o.id = r.source_node_id))
+				  WHERE r.workspace_id = :ws AND o.status IN (:statuses) AND o.id NOT IN (:visited)
+				""");
 		if (!nodeTypes.isEmpty()) {
-			jpql.append(" and o.nodeType in :nodeTypes");
+			sql.append(" AND o.node_type IN (:nodeTypes)");
 		}
 		if (!relationKeys.isEmpty()) {
-			jpql.append(" and t.key in :relationKeys");
+			sql.append(" AND t.key IN (:relationKeys)");
 		}
-		jpql.append(" order by o.updatedAt desc, o.id asc, r.id asc");
-		Query query = entityManager.createQuery(jpql.toString())
-				.setParameter("ws", workspaceId).setParameter("frontier", frontier).setParameter("statuses", statuses);
+		sql.append(") SELECT * FROM ranked WHERE rn = 1 ORDER BY updated_at DESC, id ASC LIMIT :limit");
+		MapSqlParameterSource params = new MapSqlParameterSource("ws", workspaceId)
+				.addValue("frontier", frontier).addValue("visited", visited).addValue("limit", limit)
+				.addValue("statuses", statuses.stream().map(Enum::name).toList());
 		if (!nodeTypes.isEmpty()) {
-			query.setParameter("nodeTypes", nodeTypes);
+			params.addValue("nodeTypes", nodeTypes.stream().map(Enum::name).toList());
 		}
 		if (!relationKeys.isEmpty()) {
-			query.setParameter("relationKeys", relationKeys);
+			params.addValue("relationKeys", relationKeys);
 		}
-		@SuppressWarnings("unchecked")
-		List<Object[]> rows = query.setMaxResults(limit).getResultList();
-		return rows.stream()
-				.map(r -> new NeighborRow(nodeRow(r, 0), (UUID) r[5], (UUID) r[6], (String) r[7]))
-				.toList();
+		return jdbc.query(sql.toString(), params, (rs, i) -> new NeighborRow(new NodeRow(
+				rs.getObject("id", UUID.class), NodeType.valueOf(rs.getString("node_type")),
+				NodeStatus.valueOf(rs.getString("status")), rs.getString("title"),
+				rs.getObject("updated_at", OffsetDateTime.class).toInstant()),
+				rs.getObject("source_node_id", UUID.class), rs.getObject("target_node_id", UUID.class), rs.getString("key")));
 	}
 
 	/** 주어진 Node 집합 **안쪽**의 edge만(양 끝이 모두 집합에 속한 것). 생성 순서로 고정한다. */

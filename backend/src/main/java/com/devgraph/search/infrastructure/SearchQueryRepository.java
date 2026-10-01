@@ -23,14 +23,15 @@ import com.devgraph.search.application.SearchRanking;
  * <p>쿼리 형태(§9.5): Workspace로 범위를 먼저 고정 → title exact/prefix/contains, tag exact, FTS, code 부분 일치를
  * 합쳐 후보를 고르고 → 같은 척도의 점수로 정렬 `(score_key DESC, updated_at DESC, id ASC)`.
  * 점수는 `round(score * 1_000_000)::bigint`(score_key)로만 비교한다(부동소수점 cursor 문제, §9.5).
- * 최신성은 하루 단위로 계단식 감쇠시킨다 — 연속 감쇠면 페이지를 넘기는 사이 `now()`가 바뀌어 score_key가 흔들린다.
+	 * 최신성은 하루 단위로 감쇠하되 첫 페이지의 rankingAt을 cursor로 전달한다.
+	 * 날짜 경계를 넘어도 같은 검색의 최신성 점수는 고정된다(데이터 변경의 snapshot 보장은 별개).
  */
 @Repository
 public class SearchQueryRepository {
 
 	/** 검색 조건. `lq`는 소문자 원문, `tagName`은 정규화된 태그 이름(exact 비교용). */
 	public record Criteria(UUID workspaceId, UUID userId, String query, Collection<String> statuses,
-			Collection<String> types, UUID tagId, String language, String framework) {
+			Collection<String> types, UUID tagId, String language, String framework, Instant rankingAt) {
 
 		public String lq() {
 			return query.toLowerCase(Locale.ROOT);
@@ -42,7 +43,7 @@ public class SearchQueryRepository {
 
 		/** 필터를 모두 푼 조건(zero-result 안내용). 상태는 그대로 둔다. */
 		public Criteria withoutFilters() {
-			return new Criteria(workspaceId, userId, query, statuses, List.of(), null, null, null);
+			return new Criteria(workspaceId, userId, query, statuses, List.of(), null, null, null, rankingAt);
 		}
 
 		public boolean hasFilters() {
@@ -50,7 +51,7 @@ public class SearchQueryRepository {
 		}
 	}
 
-	public record Cursor(long scoreKey, Instant updatedAt, UUID id) {
+	public record Cursor(long scoreKey, Instant updatedAt, UUID id, Instant rankingAt) {
 	}
 
 	public record Row(UUID id, String type, String title, String status, Instant updatedAt, String language,
@@ -192,7 +193,7 @@ public class SearchQueryRepository {
 				+ CASE WHEN code_hit THEN %s ELSE 0 END
 				+ %s * body_rank
 				+ CASE WHEN favorite THEN %s ELSE 0 END
-				+ %s * greatest(0, 1 - floor(extract(epoch from (now() - updated_at)) / 86400) / %d)""",
+				+ %s * least(1, greatest(0, 1 - floor(extract(epoch from (cast(:rankingAt as timestamptz) - updated_at)) / 86400) / %d))""",
 				SearchRanking.EXACT_TITLE, SearchRanking.TITLE_PREFIX, SearchRanking.TITLE_CONTAINS,
 				SearchRanking.EXACT_TAG, SearchRanking.TITLE_FTS, SearchRanking.LANGUAGE_FRAMEWORK, SearchRanking.CODE,
 				SearchRanking.BODY_FTS, SearchRanking.FAVORITE, SearchRanking.RECENCY_MAX, SearchRanking.RECENCY_DAYS);
@@ -230,6 +231,7 @@ public class SearchQueryRepository {
 				.addValue("ws", c.workspaceId())
 				.addValue("uid", c.userId())
 				.addValue("q", c.query())
+				.addValue("rankingAt", OffsetDateTime.ofInstant(c.rankingAt(), java.time.ZoneOffset.UTC))
 				.addValue("lq", lq)
 				.addValue("lprefix", LikeEscape.prefix(lq))
 				.addValue("lcontains", LikeEscape.contains(lq))

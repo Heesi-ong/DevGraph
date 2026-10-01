@@ -73,18 +73,22 @@ public class SearchService {
 		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
 		Set<NodeStatus> statuses = includeArchived ? EnumSet.of(NodeStatus.ACTIVE, NodeStatus.ARCHIVED)
 				: EnumSet.of(NodeStatus.ACTIVE);
+		Cursor decodedCursor = decodeCursor(cursor);
+		Instant rankingAt = decodedCursor == null ? Instant.now().truncatedTo(ChronoUnit.MICROS)
+				: decodedCursor.rankingAt();
 		Criteria criteria = new Criteria(workspaceId, userId, query, statuses.stream().map(Enum::name).toList(),
 				types == null ? List.of() : types.stream().distinct().map(Enum::name).toList(), tagId,
-				normalizeFilter(language), normalizeFilter(framework));
+				normalizeFilter(language), normalizeFilter(framework), rankingAt);
 
-		List<Row> rows = repository.search(criteria, decodeCursor(cursor), size + 1);
+		List<Row> rows = repository.search(criteria, decodedCursor, size + 1);
 		boolean hasMore = rows.size() > size;
 		List<Row> page = hasMore ? rows.subList(0, size) : rows;
 		String nextCursor = null;
 		if (hasMore) {
 			Row last = page.get(page.size() - 1);
 			nextCursor = CursorCodec.encode(Long.toString(last.scoreKey()),
-					Long.toString(ChronoUnit.MICROS.between(Instant.EPOCH, last.updatedAt())), last.id().toString());
+					Long.toString(ChronoUnit.MICROS.between(Instant.EPOCH, last.updatedAt())), last.id().toString(),
+					Long.toString(ChronoUnit.MICROS.between(Instant.EPOCH, rankingAt)));
 		}
 
 		List<String> terms = Highlighter.terms(query);
@@ -185,10 +189,11 @@ public class SearchService {
 		if (cursor == null || cursor.isBlank()) {
 			return null;
 		}
-		List<String> parts = CursorCodec.decode(cursor, 3);
+		List<String> parts = CursorCodec.decode(cursor, 4);
 		try {
 			return new Cursor(Long.parseLong(parts.get(0)),
-					Instant.EPOCH.plus(Long.parseLong(parts.get(1)), ChronoUnit.MICROS), UUID.fromString(parts.get(2)));
+					Instant.EPOCH.plus(Long.parseLong(parts.get(1)), ChronoUnit.MICROS), UUID.fromString(parts.get(2)),
+					Instant.EPOCH.plus(Long.parseLong(parts.get(3)), ChronoUnit.MICROS));
 		} catch (RuntimeException e) {
 			throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "유효하지 않은 cursor입니다.");
 		}

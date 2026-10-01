@@ -85,7 +85,8 @@ public class RelationService {
 
 	/** 타입/메모 변경. 요청에서 null인 필드는 변경 없음(빈 메모 문자열이 "지움"). */
 	@Transactional
-	public RelationView update(UUID userId, UUID relationId, UUID relationTypeId, String note) {
+	public RelationView update(UUID userId, UUID relationId, UUID relationTypeId, String note,
+			UUID sourceNodeId, UUID targetNodeId) {
 		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
 		RelationJpaEntity relation = relationRepository.findByIdAndWorkspaceId(relationId, workspaceId)
 				.orElseThrow(RelationService::notFound);
@@ -95,13 +96,22 @@ public class RelationService {
 		RelationTypeJpaEntity type = relationTypeId == null
 				? typeRepository.findById(relation.getRelationTypeId()).orElseThrow()
 				: requireType(workspaceId, relationTypeId);
-		if (!type.getId().equals(relation.getRelationTypeId())) {
-			requireAllowed(type, nodes.get(relation.getSourceNodeId()), nodes.get(relation.getTargetNodeId()));
+		RelationTypeJpaEntity previousType = typeRepository.findById(relation.getRelationTypeId()).orElseThrow();
+		if (sourceNodeId == null && targetNodeId == null && previousType.isSymmetric() != type.isSymmetric()) {
+			throw new ApiException(HttpStatus.CONFLICT, "RELATION_DIRECTION_REQUIRED", "관계 방향을 지정해 주세요.");
 		}
+		UUID source = sourceNodeId == null ? relation.getSourceNodeId() : sourceNodeId;
+		UUID target = targetNodeId == null ? relation.getTargetNodeId() : targetNodeId;
+		if ((sourceNodeId == null) != (targetNodeId == null)
+				|| source.equals(target) || !nodes.keySet().equals(Set.of(source, target))) {
+			throw validation("sourceNodeId", "ENDPOINTS_MUST_MATCH_EXISTING_RELATION");
+		}
+		requireAllowed(type, nodes.get(source), nodes.get(target));
 		String newNote = note == null ? relation.getNote() : cleanNote(note);
-		UUID[] ends = orient(type, relation.getSourceNodeId(), relation.getTargetNodeId());
+		UUID[] ends = orient(type, source, target);
 		boolean changed = !type.getId().equals(relation.getRelationTypeId())
 				|| !ends[0].equals(relation.getSourceNodeId())
+				|| !ends[1].equals(relation.getTargetNodeId())
 				|| !Objects.equals(newNote, relation.getNote());
 		if (!changed) {
 			return view(relation, type);

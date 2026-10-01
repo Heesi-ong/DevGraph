@@ -40,6 +40,26 @@ const snippet = async (page: Page, s: Session, title: string) =>
 const relate = (page: Page, s: Session, source: string, target: string, relationTypeId: string) =>
   api(page, s, 'post', '/relations', { sourceNodeId: source, targetNodeId: target, relationTypeId })
 
+test('changing a symmetric relation from the canonical target preserves the screen direction', async ({ page }) => {
+  const s = await apiSignup(page)
+  const t = await typeIds(page, s)
+  const a = await concept(page, s, 'A')
+  const b = await concept(page, s, 'B')
+  const high = a > b ? a : b
+  const low = a > b ? b : a
+  const lowTitle = a > b ? 'B' : 'A'
+  await relate(page, s, high, low, t.RELATED_TO)
+  await page.goto(`/nodes/${high}`)
+  const links = page.getByRole('list', { name: '연결', exact: true })
+  await links.getByLabel(`${lowTitle} 관계 타입 변경`).selectOption(t.IS_PART_OF)
+  await expect(links.locator('.badge', { hasText: 'is part of' })).toBeVisible()
+  await expect(page.getByRole('list', { name: '백링크' })).toHaveCount(0)
+  const detail = await api(page, s, 'get', `/nodes/${high}`)
+  expect(detail.relations.outgoing[0].type).toBe('IS_PART_OF')
+  await page.goto(`/nodes/${low}`)
+  await expect(page.getByRole('list', { name: '백링크' }).locator('.badge', { hasText: 'has part' })).toBeVisible()
+})
+
 test('learning scenario: link a snippet to a concept, see the backlink, change and delete the relation', async ({
   page,
 }) => {

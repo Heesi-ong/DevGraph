@@ -9,8 +9,8 @@ export default defineConfig({
   server: {
     port: process.env.PORT ? Number(process.env.PORT) : 5173,
     proxy: {
-      '/api': 'http://localhost:8080',
-      '/actuator': 'http://localhost:8080',
+      '/api': process.env.API_PROXY_TARGET ?? 'http://localhost:8080',
+      '/actuator': process.env.API_PROXY_TARGET ?? 'http://localhost:8080',
     },
   },
 })

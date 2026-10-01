@@ -24,7 +24,7 @@ export interface ExpansionCandidate {
   viaRelation: string
 }
 
-export type TruncationReason = 'NONE' | 'MAX_NODES' | 'MAX_EDGES' | 'MAX_DEPTH'
+export type TruncationReason = 'NONE' | 'MAX_NODES' | 'MAX_EDGES' | 'MAX_DEPTH' | 'QUERY_ROW_CAP'
 
 export interface GraphResponse {
   nodes: GraphNode[]

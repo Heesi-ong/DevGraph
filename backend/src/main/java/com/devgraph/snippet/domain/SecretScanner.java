@@ -40,7 +40,8 @@ public final class SecretScanner {
 					"\\b(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}"
 							+ "|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35})")),
 			new Rule(Kind.JWT, Pattern.compile("\\beyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}")),
-			new Rule(Kind.CONNECTION_STRING, Pattern.compile("[a-zA-Z][a-zA-Z0-9+.-]*://[^\\s:/@$<{]+:[^\\s@/$<{]+@")));
+			new Rule(Kind.CONNECTION_STRING, Pattern.compile(
+					"(?<![a-zA-Z0-9+.-])[a-zA-Z][a-zA-Z0-9+.-]*+://[^\\s:/@$<{]++:[^\\s@/$<{]++@")));
 
 	// password=..., "token": "...", DB_PASSWORD=..., AWS_SECRET_ACCESS_KEY=... 같은 대입. 앞에는 접두어가 올 수 있고
 	// (\b은 '_' 뒤를 경계로 보지 않아 DB_PASSWORD를 놓친다), 뒤에는 key/token/value 계열 접미어만 허용한다

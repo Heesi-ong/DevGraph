@@ -27,7 +27,7 @@ import com.devgraph.auth.application.MeQueryService;
 import com.devgraph.auth.application.RefreshService;
 import com.devgraph.auth.application.SessionManagementService;
 import com.devgraph.auth.application.SignupService;
-import com.devgraph.auth.infrastructure.AuthSessionFamilyJpaEntity;
+import com.devgraph.auth.infrastructure.SessionQueryRepository.SessionRow;
 import com.devgraph.auth.infrastructure.RevokeReason;
 import com.devgraph.common.error.ApiException;
 import com.devgraph.common.security.AuthCookies;
@@ -134,9 +134,9 @@ public class AuthController {
 		return new UserResponse(result.userId(), result.email(), result.displayName());
 	}
 
-	private SessionSummaryResponse toSummary(AuthSessionFamilyJpaEntity family, UUID currentFamilyId) {
-		return new SessionSummaryResponse(family.getId(), family.getId().equals(currentFamilyId),
-				family.getDeviceLabel(), family.getCreatedAt(), family.getLastRotatedAt(),
-				family.getAbsoluteExpiresAt());
+	private SessionSummaryResponse toSummary(SessionRow family, UUID currentFamilyId) {
+		return new SessionSummaryResponse(family.id(), family.id().equals(currentFamilyId),
+				family.deviceLabel(), family.lastIpPrefix(), family.createdAt(), family.lastRotatedAt(),
+				family.absoluteExpiresAt());
 	}
 }

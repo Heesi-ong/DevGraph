@@ -91,7 +91,12 @@ public class GraphService {
 		List<UUID> frontier = List.of(focus.id());
 
 		for (int level = 1; level <= depth && !frontier.isEmpty(); level++) {
-			List<NeighborRow> rows = repository.neighbors(workspaceId, frontier, statuses, types, keys, NEIGHBOR_ROW_CAP);
+			List<NeighborRow> rows = repository.neighbors(workspaceId, frontier, statuses, types, keys,
+					included.keySet(), NEIGHBOR_ROW_CAP + 1);
+			boolean queryCapped = rows.size() > NEIGHBOR_ROW_CAP;
+			if (queryCapped) {
+				rows = rows.subList(0, NEIGHBOR_ROW_CAP);
+			}
 			List<NeighborRow> fresh = firstPerNode(rows, included);
 			int capacity = maxNodes - included.size();
 			List<NeighborRow> taken = fresh.subList(0, Math.min(capacity, fresh.size()));
@@ -99,9 +104,9 @@ public class GraphService {
 			for (NeighborRow row : taken) {
 				included.put(row.node().id(), node(row.node(), level));
 			}
-			if (!cut.isEmpty() || rows.size() >= NEIGHBOR_ROW_CAP) {
+			if (!cut.isEmpty() || queryCapped) {
 				truncated = true;
-				reason = "MAX_NODES";
+				reason = !cut.isEmpty() ? "MAX_NODES" : "QUERY_ROW_CAP";
 				addCandidates(candidates, cut);
 				break; // 상한에 닿았다. 더 깊은 단계는 후보로 안내한다.
 			}
@@ -109,7 +114,8 @@ public class GraphService {
 		}
 		// 요청 depth까지 다 탐색했다면 그 다음 한 걸음의 Node를 확장 후보로 보여 준다(§13.3).
 		if (!truncated && !frontier.isEmpty() && candidates.isEmpty()) {
-			List<NeighborRow> beyond = repository.neighbors(workspaceId, frontier, statuses, types, keys, NEIGHBOR_ROW_CAP);
+			List<NeighborRow> beyond = repository.neighbors(workspaceId, frontier, statuses, types, keys,
+					included.keySet(), NEIGHBOR_ROW_CAP);
 			addCandidates(candidates, firstPerNode(beyond, included));
 		}
 

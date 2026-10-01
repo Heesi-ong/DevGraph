@@ -11,6 +11,7 @@ import { RelationPicker } from './RelationPicker'
 import { useInvalidateRelationViews } from './useInvalidateRelationViews'
 
 interface RowProps {
+  nodeId: string
   link: RelationLink
   nodeType: AnyNodeType
   direction: 'outgoing' | 'incoming'
@@ -19,7 +20,7 @@ interface RowProps {
   onError: (message: string | null) => void
 }
 
-function RelationRow({ link, nodeType, direction, types, editable, onError }: RowProps) {
+function RelationRow({ nodeId, link, nodeType, direction, types, editable, onError }: RowProps) {
   const invalidate = useInvalidateRelationViews()
   // 이 관계를 다른 타입으로 바꿀 때도 같은 허용 조합 규칙이 적용된다. 미리 걸러 선택지를 줄인다.
   const alternatives = types.filter((t) => {
@@ -29,7 +30,11 @@ function RelationRow({ link, nodeType, direction, types, editable, onError }: Ro
   })
 
   const change = useMutation({
-    mutationFn: (relationTypeId: string) => updateRelation(link.id, { relationTypeId }),
+    mutationFn: (relationTypeId: string) => updateRelation(link.id, {
+      relationTypeId,
+      sourceNodeId: direction === 'outgoing' ? nodeId : link.nodeId,
+      targetNodeId: direction === 'outgoing' ? link.nodeId : nodeId,
+    }),
     onSuccess: () => {
       onError(null)
       return invalidate()
@@ -112,7 +117,7 @@ export function RelatedNodes({
       {relations.outgoing.length > 0 && (
         <ul className="relation-list" aria-label="연결">
           {relations.outgoing.map((link) => (
-            <RelationRow key={link.id} link={link} nodeType={nodeType} direction="outgoing"
+            <RelationRow key={link.id} nodeId={nodeId} link={link} nodeType={nodeType} direction="outgoing"
               types={types.data ?? []} editable={editable} onError={setError} />
           ))}
         </ul>
@@ -122,7 +127,7 @@ export function RelatedNodes({
           <h3>이 항목을 가리키는 항목 (Backlinks)</h3>
           <ul className="relation-list" aria-label="백링크">
             {relations.incoming.map((link) => (
-              <RelationRow key={link.id} link={link} nodeType={nodeType} direction="incoming"
+              <RelationRow key={link.id} nodeId={nodeId} link={link} nodeType={nodeType} direction="incoming"
                 types={types.data ?? []} editable={editable} onError={setError} />
             ))}
           </ul>

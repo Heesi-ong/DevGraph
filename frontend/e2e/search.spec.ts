@@ -80,6 +80,22 @@ test('results can be walked and opened with the keyboard only', async ({ page })
   await expect(page.getByRole('heading', { name: opened })).toBeVisible()
 })
 
+test('global search and history navigation keep the page input synchronized', async ({ page }) => {
+  const s = await apiSignup(page)
+  await concept(page, s, 'Kotlin flow')
+  await concept(page, s, 'Docker basics')
+  await page.goto('/search?q=kotlin')
+  await expect(page.getByLabel('검색어', { exact: true })).toHaveValue('kotlin')
+  await page.getByLabel('전역 검색').fill('docker')
+  await page.getByLabel('전역 검색').press('Enter')
+  await expect(page.getByLabel('검색어', { exact: true })).toHaveValue('docker')
+  await expect(page.getByRole('list', { name: '검색 결과' })).toContainText('Docker basics')
+  await page.goBack()
+  await expect(page.getByLabel('검색어', { exact: true })).toHaveValue('kotlin')
+  await page.goForward()
+  await expect(page.getByLabel('검색어', { exact: true })).toHaveValue('docker')
+})
+
 test('input shorter than two characters (or Korean jamo only) never reaches the server and shows recent items', async ({
   page,
 }) => {

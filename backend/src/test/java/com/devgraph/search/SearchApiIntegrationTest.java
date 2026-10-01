@@ -238,6 +238,29 @@ class SearchApiIntegrationTest extends AbstractIntegrationTest {
 	}
 
 	// ---- cursor contract ---------------------------------------------------------------------
+	@Test
+	void cursorKeepsRecencyScoresStableAcrossADayBoundary() throws InterruptedException {
+		String token = signupToken();
+		String a = concept(token, "Boundary item A");
+		concept(token, "Boundary item B");
+		concept(token, "Boundary item C");
+		UUID workspace = jdbc.queryForObject("select workspace_id from knowledge_nodes where id = ?", UUID.class,
+				UUID.fromString(a));
+		jdbc.update("update knowledge_nodes set updated_at = now() - interval '1 day' + interval '2 seconds' where workspace_id = ?", workspace);
+		var first = search(token, "boundary item", "&size=1");
+		String cursor = JsonPath.read(first.body, "$.cursor");
+		var parts = com.devgraph.common.web.CursorCodec.decode(cursor, 4);
+		Thread.sleep(2500); // The score boundary passes, without changing any stored data.
+		var second = search(token, "boundary item", "&size=1&cursor=" + cursor);
+		assertThat(ids(second)).doesNotContainAnyElementsOf(ids(first));
+		assertThat(JsonPath.<Double>read(second.hit(0), "$.score"))
+				.isEqualTo(JsonPath.<Double>read(first.hit(0), "$.score"));
+		String next = JsonPath.read(second.body, "$.cursor");
+		assertThat(com.devgraph.common.web.CursorCodec.decode(next, 4).get(3)).isEqualTo(parts.get(3));
+		var third = search(token, "boundary item", "&size=1&cursor=" + next);
+		List<String> walked = new ArrayList<>(ids(first)); walked.addAll(ids(second)); walked.addAll(ids(third));
+		assertThat(walked).hasSize(3).doesNotHaveDuplicates();
+	}
 
 	@Test
 	void cursorPagingWalksEveryResultOnceInTheSameOrderAsOnePage() {
