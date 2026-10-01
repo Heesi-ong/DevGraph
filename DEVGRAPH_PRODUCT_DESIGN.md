@@ -1741,6 +1741,8 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - NFR-01 측정(28k Node/109k Relation, 20 VU, warm, 같은 호스트): 목록 p95 174ms, 상세 178ms, 검색 509ms, focus graph 197ms — 모두 목표 이내. **측정 전에는 검색이 미달**(p95 3.66s)이었고 원인(순위 함수를 FTS 비해당 후보에도 계산)을 고쳤다.
 - 보안 점검: Trivy 기준 backend 의존성·OS 패키지 CRITICAL/HIGH 0(Tomcat 11.0.26, BouncyCastle 1.86, Jackson 3.1.7/2.21.7로 상향 — Boot BOM이 관리하는 값을 `build.gradle`에서 override), 프론트 prod 의존성 critical/high 0.
 
+- §27 최종 검증(v2.0 이후 보강): 핵심 Workflow E2E가 14단계 **전부**(14번 Export 포함 — 화면에서 내보내 ZIP을 풀어 Node 8개·Snippet 원문·관계 9개의 종류/방향/양 끝 존재·manifest checksum을 검사)를 따라가고, `FlywayUpgradeTest`가 "기존 database upgrade"(V10 데이터가 있는 DB를 최신으로: 데이터 보존, membership FK 부여, 고아 참조가 있으면 삭제 없이 중단)를 검증한다. README를 현재 상태로 갱신했다.
+
 **구현 중 발견·수정한 결함**
 
 - 제한 세션이 `POST /auth/refresh`로 제한을 풀지 못함(화이트리스트에 없었음) → §17.2.3에 명시·수정, 통합 테스트의 refresh 헬퍼가 브라우저처럼 Bearer를 함께 보내도록 바꿈.

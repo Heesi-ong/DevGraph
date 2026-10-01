@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 
 // Phase 6 완료 조건(설계서 §19, §27.1): 전체 Workflow를 seed 없이 신규 사용자 계정에서 수행한다.
-// 14단계 중 Export(Phase 7)를 제외한 1~13을 화면으로 따라간다.
+// 14단계 전부를 화면으로 따라간다(14: Export ZIP을 받아 내용과 관계를 검사).
 // 백엔드(:8080)가 dev 프로필 + PostgreSQL로 떠 있어야 한다.
 
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
@@ -175,4 +176,46 @@ test('the whole completion workflow runs on a fresh account', async ({ page }) =
     'public interface OrderRepository extends JpaRepository<Order, Long> {}',
   )
   await expect(page.getByText('v1 · 복사 1회')).toBeVisible()
+
+  // 14. Export에서 위 데이터와 관계가 손실 없이 포함된 것을 확인한다.
+  await page.goto('/settings')
+  await page.getByRole('button', { name: '내보내기 만들기' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByLabel('현재 비밀번호').fill('correct-horse-battery')
+  await dialog.getByRole('button', { name: '내보내기 시작' }).click()
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 40_000 }),
+    page.getByRole('button', { name: 'ZIP 다운로드' }).click({ timeout: 40_000 }),
+  ])
+  const zipPath = await download.path()
+  const read = (entry: string) => execFileSync('unzip', ['-p', zipPath, entry], { encoding: 'utf-8' })
+  const names = execFileSync('unzip', ['-Z1', zipPath], { encoding: 'utf-8' }).trim().split('\n')
+
+  const mdFiles = names.filter((n) => n.startsWith('nodes/') && n.endsWith('.md'))
+  const mdText = mdFiles.map(read).join('\n')
+  for (const title of ['Spring Boot', 'JPA', 'LazyInitializationException', 'Lazy Loading', 'JPA repository example', 'fetch join query', '서비스 트랜잭션 안에서 fetch join', 'TeamFlow']) {
+    expect(mdText, title).toContain(title)
+  }
+  expect(mdFiles).toHaveLength(8) // Concept 3, Snippet 2, Error, Solution, Project
+  // Snippet 소스는 원문 그대로 들어간다.
+  const snippetSources = names.filter((n) => n.startsWith('snippets/')).map(read)
+  expect(snippetSources).toContain('public interface OrderRepository extends JpaRepository<Order, Long> {}')
+  expect(snippetSources).toContain('select o from Order o join fetch o.items')
+
+  // 1~10단계에서 만든 관계 9개가 방향과 종류 그대로, 양 끝 Node가 모두 있는 채로 들어간다.
+  const relations = JSON.parse(read('relations.json')) as { type: string; sourceNodeId: string; targetNodeId: string }[]
+  const keys = relations.map((r) => r.type).sort()
+  expect(keys).toEqual(
+    ['APPLIED_IN', 'CAUSED_BY', 'IMPLEMENTED_WITH', 'IS_EXAMPLE_OF', 'OCCURRED_IN', 'RELATED_TO', 'SOLVED_BY', 'USED_IN', 'USED_IN'].sort(),
+  )
+  const nodeIds = new Set(mdFiles.map((n) => n.split('/').pop()!.replace('.md', '')))
+  for (const r of relations) {
+    expect(nodeIds.has(r.sourceNodeId) && nodeIds.has(r.targetNodeId)).toBe(true)
+  }
+  // manifest의 checksum이 실제 파일과 일치한다.
+  const manifest = JSON.parse(read('manifest.json')) as { files: { path: string; sha256: string }[] }
+  for (const f of manifest.files) {
+    const digest = execFileSync('sh', ['-c', `unzip -p "${zipPath}" "${f.path}" | shasum -a 256 | cut -d' ' -f1`], { encoding: 'utf-8' }).trim()
+    expect(digest, f.path).toBe(f.sha256)
+  }
 })
