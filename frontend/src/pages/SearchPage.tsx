@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { listNodes } from '../entities/knowledge-node/api'
 import type { AnyNodeType } from '../entities/knowledge-node/types'
@@ -30,6 +30,7 @@ export function SearchPage() {
   const [params, setParams] = useSearchParams()
   const filters = readFilters(params)
   const [input, setInput] = useState(filters.q)
+  useEffect(() => setInput(filters.q), [filters.q])
   const container = useRef<HTMLDivElement>(null)
   const searchable = isSearchable(filters.q)
 

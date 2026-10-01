@@ -39,7 +39,7 @@ public class RelationController {
 			@NotNull UUID relationTypeId, String note) {
 	}
 
-	public record UpdateRelationRequest(UUID relationTypeId, String note) {
+	public record UpdateRelationRequest(UUID relationTypeId, String note, UUID sourceNodeId, UUID targetNodeId) {
 	}
 
 	private final RelationService service;
@@ -66,7 +66,8 @@ public class RelationController {
 	@PatchMapping("/relations/{id}")
 	public RelationView update(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id,
 			@RequestBody UpdateRelationRequest request) {
-		return service.update(user.userId(), id, request.relationTypeId(), request.note());
+		return service.update(user.userId(), id, request.relationTypeId(), request.note(),
+				request.sourceNodeId(), request.targetNodeId());
 	}
 
 	@DeleteMapping("/relations/{id}")

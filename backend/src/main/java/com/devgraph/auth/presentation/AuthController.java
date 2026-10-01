@@ -30,9 +30,7 @@ import com.devgraph.auth.application.ReauthService;
 import com.devgraph.auth.application.RefreshService;
 import com.devgraph.auth.application.SessionManagementService;
 import com.devgraph.auth.application.SignupService;
-import com.devgraph.auth.infrastructure.AuthSessionFamilyJpaEntity;
-import com.devgraph.auth.infrastructure.AuthSessionJpaEntity;
-import com.devgraph.auth.infrastructure.AuthSessionRepository;
+import com.devgraph.auth.infrastructure.SessionQueryRepository.SessionRow;
 import com.devgraph.auth.infrastructure.RevokeReason;
 import com.devgraph.common.error.ApiException;
 import com.devgraph.common.security.AuthCookies;
@@ -52,20 +50,18 @@ public class AuthController {
 	private final MeQueryService meQueryService;
 	private final SessionManagementService sessionManagementService;
 	private final AuthCookies authCookies;
-	private final AuthSessionRepository sessionRepository;
 	private final PasswordService passwordService;
 	private final ReauthService reauthService;
 
 	public AuthController(SignupService signupService, LoginService loginService, RefreshService refreshService,
 			MeQueryService meQueryService, SessionManagementService sessionManagementService, AuthCookies authCookies,
-			PasswordService passwordService, ReauthService reauthService, AuthSessionRepository sessionRepository) {
+			PasswordService passwordService, ReauthService reauthService) {
 		this.signupService = signupService;
 		this.loginService = loginService;
 		this.refreshService = refreshService;
 		this.meQueryService = meQueryService;
 		this.sessionManagementService = sessionManagementService;
 		this.authCookies = authCookies;
-		this.sessionRepository = sessionRepository;
 		this.passwordService = passwordService;
 		this.reauthService = reauthService;
 	}
@@ -162,11 +158,9 @@ public class AuthController {
 		return new UserResponse(result.userId(), result.email(), result.displayName());
 	}
 
-	private SessionSummaryResponse toSummary(AuthSessionFamilyJpaEntity family, UUID currentFamilyId) {
-		String ipPrefix = sessionRepository.findFirstByFamilyIdOrderByCreatedAtDesc(family.getId())
-				.map(AuthSessionJpaEntity::getIpPrefix).orElse(null);
-		return new SessionSummaryResponse(family.getId(), family.getId().equals(currentFamilyId),
-				family.getDeviceLabel(), ipPrefix, family.getCreatedAt(), family.getLastRotatedAt(),
-				family.getAbsoluteExpiresAt());
+	private SessionSummaryResponse toSummary(SessionRow family, UUID currentFamilyId) {
+		return new SessionSummaryResponse(family.id(), family.id().equals(currentFamilyId),
+				family.deviceLabel(), family.lastIpPrefix(), family.createdAt(), family.lastRotatedAt(),
+				family.absoluteExpiresAt());
 	}
 }

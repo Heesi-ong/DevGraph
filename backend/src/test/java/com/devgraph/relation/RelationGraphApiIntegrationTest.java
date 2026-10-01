@@ -201,6 +201,56 @@ class RelationGraphApiIntegrationTest extends AbstractIntegrationTest {
 	}
 
 	// ---- update / delete --------------------------------------------------------------------
+	@Test
+	void symmetricToDirectedUsesExplicitScreenDirectionAndRejectsDifferentEndpoints() {
+		String token = signupToken();
+		String a = concept(token, "A");
+		String b = concept(token, "B");
+		String c = concept(token, "C");
+		String high = a.compareTo(b) > 0 ? a : b;
+		String low = a.compareTo(b) > 0 ? b : a;
+		String id = JsonPath.read(createRelation(token, high, low, "RELATED_TO", null).getBody(), "$.id");
+		var missing = call(HttpMethod.PATCH, "/api/v1/relations/" + id, token,
+				Map.of("relationTypeId", typeId(token, "IS_PART_OF")));
+		assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+		assertThat(missing.getBody()).contains("RELATION_DIRECTION_REQUIRED");
+		var changed = call(HttpMethod.PATCH, "/api/v1/relations/" + id, token,
+				Map.of("relationTypeId", typeId(token, "IS_PART_OF"), "sourceNodeId", high, "targetNodeId", low));
+		assertThat(changed.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(JsonPath.<String>read(changed.getBody(), "$.sourceNodeId")).isEqualTo(high);
+		assertThat(JsonPath.<String>read(changed.getBody(), "$.targetNodeId")).isEqualTo(low);
+		var invalid = call(HttpMethod.PATCH, "/api/v1/relations/" + id, token,
+				Map.of("sourceNodeId", high, "targetNodeId", c));
+		assertThat(invalid.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+		var back = call(HttpMethod.PATCH, "/api/v1/relations/" + id, token,
+				Map.of("relationTypeId", typeId(token, "RELATED_TO"), "sourceNodeId", high, "targetNodeId", low));
+		assertThat(back.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(JsonPath.<String>read(back.getBody(), "$.sourceNodeId")).isEqualTo(low);
+	}
+
+	@Test
+	void graphDeduplicatesNeighborsBeforeApplyingTheQueryLimit() {
+		String token = signupToken();
+		String hub = concept(token, "Hub");
+		UUID hubId = UUID.fromString(hub);
+		UUID workspace = jdbc.queryForObject("select workspace_id from knowledge_nodes where id = ?", UUID.class, hubId);
+		UUID user = jdbc.queryForObject("select created_by from knowledge_nodes where id = ?", UUID.class, hubId);
+		// 500 recent neighbors × 12 types exceed the former 5,000 edge-row cap. The older neighbor must still
+		// be returned as an expansion candidate after the 499 available slots are filled.
+		jdbc.update("""
+				insert into knowledge_nodes(workspace_id, created_by, node_type, title, updated_at)
+				select ?, ?, 'CONCEPT', 'dense ' || g, now() from generate_series(1, 500) g""", workspace, user);
+		String older = concept(token, "Older neighbor");
+		jdbc.update("update knowledge_nodes set updated_at = now() - interval '1 day' where id = ?", UUID.fromString(older));
+		jdbc.update("""
+				insert into knowledge_relations(workspace_id, source_node_id, target_node_id, relation_type_id, created_by)
+				select ?, ?, n.id, t.id, ? from knowledge_nodes n cross join relation_types t
+				where n.workspace_id = ? and n.id <> ? and t.key <> 'RELATED_TO'""", workspace, hubId, user, workspace, hubId);
+		var response = graph(token, hub, "depth=1&maxNodes=500");
+		assertThat(JsonPath.<List<?>>read(response, "$.nodes")).hasSize(500);
+		assertThat(JsonPath.<List<String>>read(response, "$.nextExpansionCandidates[*].nodeId")).contains(older);
+		assertThat(JsonPath.<String>read(response, "$.truncationReason")).isEqualTo("MAX_NODES");
+	}
 
 	@Test
 	void updateChangesTypeAndNoteWithSameRulesAndDeleteRemovesTheEdge() throws InterruptedException {
@@ -239,7 +289,8 @@ class RelationGraphApiIntegrationTest extends AbstractIntegrationTest {
 		String high = low.equals(a) ? snippet : a;
 		String dirId = JsonPath.read(createRelation(token, high, low, "IS_PART_OF", null).getBody(), "$.id");
 		var sym = call(HttpMethod.PATCH, "/api/v1/relations/" + dirId, token,
-				Map.of("relationTypeId", typeId(token, "RELATED_TO")));
+				Map.of("relationTypeId", typeId(token, "RELATED_TO"), "sourceNodeId", high, "targetNodeId", low));
+		assertThat(sym.getStatusCode()).isEqualTo(HttpStatus.OK);
 		assertThat((String) JsonPath.read(sym.getBody(), "$.sourceNodeId")).isEqualTo(low);
 
 		assertThat(call(HttpMethod.DELETE, "/api/v1/relations/" + relationId, token, null).getStatusCode())

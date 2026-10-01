@@ -5,8 +5,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import com.jayway.jsonpath.JsonPath;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -20,6 +28,67 @@ import com.devgraph.support.AbstractIntegrationTest;
  * 불가, 보안 오류 표준화. §20.2: credential 오류, token rotation/reuse.
  */
 class AuthFlowIntegrationTest extends AbstractIntegrationTest {
+	@Autowired
+	JdbcTemplate jdbc;
+
+	@Test
+	void concurrentRefreshRotatesOneAtATimeAndKeepsExactlyOneLiveToken() throws Exception {
+		var registered = signup(uniqueEmail(), "Concurrent", "correct-horse-battery");
+		String old = cookie(registered, "refresh_token").orElseThrow();
+		String csrf = cookie(registered, "csrf_token").orElseThrow();
+		UUID family = jdbc.queryForObject("select family_id from auth_sessions where refresh_token_hash = ?",
+				UUID.class, com.devgraph.common.security.TokenHasher.sha256(old));
+		var pool = Executors.newFixedThreadPool(2);
+		var ready = new CountDownLatch(2);
+		var start = new CountDownLatch(1);
+		List<Future<ResponseEntity<String>>> futures = new ArrayList<>();
+		try {
+			for (int i = 0; i < 2; i++) {
+				futures.add(pool.submit(() -> { ready.countDown(); start.await(); return refresh(old, csrf); }));
+			}
+			assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+			start.countDown();
+			List<ResponseEntity<String>> responses = new ArrayList<>();
+			for (var future : futures) responses.add(future.get(30, TimeUnit.SECONDS));
+			// family 잠금으로 직렬화된다. 첫 요청이 회전하고 두 번째는 10초 유예 안의 재전송이라 둘 다 성공하며(§17.2) 사슬은 한 줄이다.
+			// (같은 토큰의 세 번째 동시 재전송부터는 직전 토큰이 아니므로 탈취로 본다 — 프론트는 refresh를 하나만 날린다.)
+			assertThat(responses.stream().filter(r -> r.getStatusCode().is2xxSuccessful())).hasSize(2);
+			assertThat(jdbc.queryForObject("select count(*) from auth_sessions where family_id = ?", Integer.class,
+					family)).isEqualTo(3);
+			assertThat(jdbc.queryForObject("select count(*) from auth_sessions where family_id = ? and rotated_at is null and revoked_at is null",
+					Integer.class, family)).isEqualTo(1);
+			assertThat(jdbc.queryForObject("select revoked_at is null from auth_session_families where id = ?",
+					Boolean.class, family)).isTrue();
+			// 원래 토큰은 이제 직전 토큰이 아니다 — 다시 쓰면 탈취로 보고 family가 폐기된다.
+			var replay = refresh(old, csrf);
+			assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+			assertThat(replay.getBody()).contains("TOKEN_REUSED");
+			assertThat(jdbc.queryForObject("select revoke_reason from auth_session_families where id = ?",
+					String.class, family)).isEqualTo("REUSE_DETECTED");
+		} finally { start.countDown(); pool.shutdownNow(); }
+	}
+
+	@Test
+	void sessionListUsesFamilyIdsLatestIpAndHidesExpiredSessions() {
+		var registered = signup(uniqueEmail(), "Sessions", "correct-horse-battery");
+		String token = extractAccessToken(registered.getBody());
+		String old = cookie(registered, "refresh_token").orElseThrow();
+		String csrf = cookie(registered, "csrf_token").orElseThrow();
+		UUID family = jdbc.queryForObject("select family_id from auth_sessions where refresh_token_hash = ?",
+				UUID.class, com.devgraph.common.security.TokenHasher.sha256(old));
+		jdbc.update("update auth_sessions set ip_prefix = 'old' where family_id = ?", family);
+		var rotated = refresh(old, csrf);
+		jdbc.update("update auth_sessions set ip_prefix = 'latest' where refresh_token_hash = ?",
+				com.devgraph.common.security.TokenHasher.sha256(cookie(rotated, "refresh_token").orElseThrow()));
+		var headers = new HttpHeaders(); headers.setBearerAuth(token);
+		var list = restTemplate.exchange(baseUrl("/api/v1/auth/sessions"), HttpMethod.GET,
+				new HttpEntity<>(headers), String.class);
+		assertThat(JsonPath.<List<String>>read(list.getBody(), "$.items[*].id")).containsExactly(family.toString());
+		assertThat(JsonPath.<String>read(list.getBody(), "$.items[0].ipPrefix")).isEqualTo("latest");
+		jdbc.update("update auth_session_families set absolute_expires_at = now() - interval '1 second' where id = ?", family);
+		assertThat(JsonPath.<List<?>>read(restTemplate.exchange(baseUrl("/api/v1/auth/sessions"), HttpMethod.GET,
+				new HttpEntity<>(headers), String.class).getBody(), "$.items")).isEmpty();
+	}
 
 	@Test
 	void signupCreatesUserAndReturnsTokens() {
@@ -73,9 +142,6 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 		assertThat(response.getBody()).contains("\"workspace\"");
 	}
-
-	@org.springframework.beans.factory.annotation.Autowired
-	org.springframework.jdbc.core.JdbcTemplate jdbc;
 
 	@Test
 	void lostRefreshResponseIsForgivenWithinTheGraceWindowOnly() {

@@ -16,7 +16,9 @@ export async function createRelation(input: {
   return data
 }
 
-export async function updateRelation(id: string, changes: { relationTypeId?: string; note?: string }) {
+export async function updateRelation(id: string, changes: {
+  relationTypeId?: string; note?: string; sourceNodeId?: string; targetNodeId?: string
+}) {
   const { data } = await apiClient.patch<RelationView>(`/relations/${id}`, changes)
   return data
 }

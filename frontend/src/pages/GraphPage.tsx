@@ -16,6 +16,7 @@ const TRUNCATION_TEXT: Record<string, string> = {
   MAX_NODES: '항목이 많아 일부만 표시합니다.',
   MAX_EDGES: '관계가 많아 일부만 표시합니다.',
   MAX_DEPTH: '탐색 깊이 제한으로 일부만 표시합니다.',
+  QUERY_ROW_CAP: '탐색 대상이 많아 일부만 표시합니다.',
 }
 
 // 필터는 URL search params가 유일한 상태다(§16). 새로고침·공유 링크에서도 같은 그래프가 나온다.
