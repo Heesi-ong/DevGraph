@@ -3,3 +3,13 @@ devgraph:
     jwt-signing-key: devgraph-test-signing-key-not-for-production-use
   cookie:
     secure: false
+  # 테스트는 정기 작업을 직접 호출해 검증한다(백그라운드 실행이 테스트 데이터를 건드리지 않게 끈다).
+  jobs:
+    enabled: false
+  # 기본 한도는 운영 값이라 대량 데이터를 만드는 통합 테스트가 걸린다. 한도 자체는 RateLimitIntegrationTest가 검증한다.
+  rate-limit:
+    mutation-per-minute: 100000
+    search-per-minute: 100000
+    login-failures-per-minute: 100000
+    password-attempt-failures-per-minute: 100000
+    export-interval-minutes: 0

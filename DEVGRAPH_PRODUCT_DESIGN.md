@@ -1,6 +1,6 @@
 # DevGraph 제품·서비스·기술 설계서
 
-> 문서 상태: 기준안 v1.9 (Phase 0~6 구현 결과 반영)  
+> 문서 상태: 기준안 v2.0 (Phase 0~7 구현 결과 반영)  
 > 작성일: 2026-09-28  
 > 대상: Product, UX, Frontend, Backend, QA, 운영 담당 및 구현 에이전트  
 > 문서 목적: 별도 구두 설명 없이 MVP와 1.0 구현을 시작할 수 있는 Source of Truth
@@ -14,6 +14,8 @@
 > **v1.4 변경 요약:** Node 영구 삭제 cascade에 누락됐던 `node_views`/`layout_positions`를 추가하고 API의 `HAS_DEPENDENCIES`를 제거해 `TRASHED` 전제조건 + `409 INVALID_NODE_STATE`로 통일(§11.3, §14.3), 계정 탈퇴에 `POST /account/deletion-cancel`과 `DELETION_PENDING` 상태를 추가(§9.1, §14.2), `must_change_password`(§17.8 강제 비밀번호 재설정)와 `DELETION_PENDING`을 Access JWT `restriction` claim 기반의 단일 화이트리스트 필터로 통합(§17.2.3 신설), `users.must_change_password`/`status`, `auth_session_families.device_label` 컬럼 추가와 `revoke_reason`에서 중복이던 `ACCOUNT_DELETED`를 `ACCOUNT_DELETION_REQUESTED`로 단일화(§12.3), 회원가입에서 실사용 계획이 없는 `termsVersion`을 제거(§9.1, §14.2), `POST/GET /relation-types`를 실제 구현 범위(GET은 시스템 13종만, POST는 Growth로 라우트 자체를 만들지 않음)에 맞게 정정(§14.5), reauth 토큰 소비를 조건부 `UPDATE ... RETURNING` 기반 원자적 단일 소비로 명시(§17.2.2), 검색 `search_vector`에서 태그를 제외하고 join 기반 스코어링으로 전환해 벡터 갱신 시점 미결 문제를 제거(§15.4)했다. 세부 근거는 각 절 하단의 결정 사유를 참고한다.
 >
 > **v1.9 변경 요약:** Phase 6(Project / Error / Solution, 그리고 Resource) 구현 결과를 반영했다. 서브타입 4종의 API 계약·검증·상태 전이(Error 해결 상태 머신, 미해결 경고)·체인 원자성(Solution 생성과 `SOLVED_BY`를 한 트랜잭션)·Resource URL 정규화와 중복 경고·Project 그래프를 §14.6에, 검색 범위 확장(Error 메시지·Solution 본문·Project 설명)과 가중치를 §9.5·§15.4에, 구현 결과와 이월 항목을 §19에 기록했다.
+>
+> **v2.0 변경 요약:** Phase 7(서비스 안정화) 구현 결과를 반영했다. 재인증·비밀번호 변경·계정 탈퇴/취소·영구 삭제·Export·rate limit·보안 헤더의 실제 계약과 수치를 §14.2·§14.6·§17에, 운영 구성(prod compose, 구조화 로그, health 그룹, 백업/복원 스크립트)을 §21에, 구현 결과·측정 결과·이월 항목을 §19에 기록했다. 부하 측정이 찾아낸 검색 결함(순위 함수를 FTS 비해당 행에도 계산해 p95 3.66s)과 복원 리허설·보안 점검 결과는 `docs/NFR_REPORT.md`, `docs/SECURITY_CHECKLIST.md`, `docs/RUNBOOK.md`에 있다. **§17.2의 refresh 응답 유실은 10초 유예 방식으로 확정·구현**했다. 제한 세션이 `POST /auth/refresh`로 제한을 풀 수 있어야 한다는 §17.2.3의 암묵적 전제를 화이트리스트에 명시했다(구현 중 발견한 결함).
 >
 > **v1.8 변경 요약:** Phase 5(Search) 구현 결과를 반영했다. `GET /search`의 실제 계약(검증, 필터, cursor, 구조화 highlight, 0건 fallback)을 §14.6에, 랭킹 가중치 조정(**정확 제목 일치 100 → 300**, 제목 부분 일치 +35 추가)과 한국어 본문 검색의 한계, 본문 색인 범위(앞 100,000자)를 §9.5·§15.4에, 구현 결과와 이월 항목을 §19에 기록했다.
 >
@@ -1010,7 +1012,7 @@ Graph 조회 정책:
 | `POST /auth/login` | 로그인 | `{email,password}` → `{user,accessToken}` + cookie | Public | 401 INVALID_CREDENTIALS, 429 |
 | `POST /auth/refresh` | token rotation | CSRF header + cookie → `{accessToken}` + new cookie | Refresh session | 401 TOKEN_EXPIRED, 401 TOKEN_REUSED, 401 SESSION_REVOKED, 401 SESSION_ABSOLUTE_EXPIRED, 403 CSRF_FAILED |
 | `POST /auth/logout` | 현재 세션(family) 종료 | 없음 → `204` | Auth/refresh | 멱등 204 |
-| `GET /auth/me` | 현재 사용자/Workspace | 없음 → `{user,workspace}` | User | 401 |
+| `GET /auth/me` | 현재 사용자/Workspace/제한 상태 | 없음 → `{user,workspace,restriction}` (`restriction`: `NONE`\|`MUST_CHANGE_PASSWORD`\|`DELETION_PENDING`, §17.2.3) | User(제한 세션 허용) | 401 |
 | `PATCH /auth/password` | 비밀번호 변경 | `{currentPassword,newPassword,revokeOtherSessions}` → `204` | User | 400, 401 |
 | `GET /auth/sessions` | 활성 세션(family) 목록 | 없음 → `{items:[{id,current,deviceLabel,ipPrefix,createdAt,lastRotatedAt,absoluteExpiresAt}]}` | User | 401 |
 | `DELETE /auth/sessions/{id}` | 세션(family) 폐기 | 없음 → `204` | Session owner | 404, 멱등 204(이미 폐기됨) |
@@ -1140,6 +1142,18 @@ _(검색의 구현 계약은 이 표 아래 "Phase 5 구현 범위" 참고)_
 | `POST /imports` | DevGraph import(Growth) | multipart + strategy + `X-Reauth-Token`(`purpose=IMPORT_CREATE`) → `202` | Owner; §17.2.2 재인증 필요 | 401 REAUTH_REQUIRED, 403 REAUTH_PURPOSE_MISMATCH, 400 SCHEMA_UNSUPPORTED |
 
 Export는 §9.8/§12.3에서 확정한 대로 항상 `export_jobs`를 거치는 비동기 방식 하나만 사용한다(동기 streaming 대안은 두지 않는다). `downloadUrl`은 `download_token_hash`로 검증되는 일회성 URL이며 15분 후 만료된다.
+
+**Phase 7 구현 범위와 세부 계약(v2.0 확정)**
+
+- **재인증 (`POST /auth/reauth {password, purpose, targetId?}`):** `purpose`는 `EXPORT_CREATE`·`ACCOUNT_DELETE_REQUEST`·`NODE_PERMANENT_DELETE`·`IMPORT_CREATE` 네 가지(§17.2.2). 토큰은 **세션 family당 하나**이며 새로 발급하면 이전 것이 무효가 된다. 원문은 응답으로만 전달하고 DB에는 SHA-256만 저장하며 TTL은 5분이다. 검증 순서는 입력(400) → 비밀번호(401 `INVALID_CREDENTIALS`, 실패는 이메일+IP 대역별 분당 5회로 제한 → 429) → 대상 소유 확인(다른 Workspace의 Node는 404). 사용 시에는 `verify`(소비하지 않음) → 상태·대상 검사 → `consume`(원자적 `UPDATE … RETURNING`, 동시에 두 요청이 써도 정확히 한 번만 성공) 순서라서, 토큰이 틀렸거나 이미 쓴 경우는 항상 같은 `401 REAUTH_REQUIRED`이고(존재 여부를 알리지 않음) 용도 불일치는 `403 REAUTH_PURPOSE_MISMATCH`, 대상 불일치는 `403 REAUTH_TARGET_MISMATCH`다. **작업이 상태 검사에서 실패(예: `409 EXPORT_IN_PROGRESS`)하면 토큰은 소비되지 않는다.**
+- **비밀번호 변경 (`PATCH /auth/password`):** 현재 비밀번호 확인(실패는 같은 5회/분 제한), 성공하면 `must_change_password=false`, `revokeOtherSessions=true`면 호출 family를 뺀 모든 family를 `PASSWORD_CHANGED`로 폐기한다. 프론트엔드는 성공 직후 `POST /auth/refresh`로 제한이 풀린 토큰을 받는다.
+- **계정 탈퇴 (`POST /account/deletion-request`, `…/deletion-cancel`):** 요청은 재인증(`ACCOUNT_DELETE_REQUEST`)과 `confirmation`(본인 이메일과 일치)을 요구한다. 성공하면 모든 family를 `ACCOUNT_DELETION_REQUESTED`로 폐기하고 refresh 쿠키를 만료시키며 `{scheduledAt = 요청 +7일}`을 돌려준다. 같은 계정으로 다시 로그인하면 `restriction=DELETION_PENDING`이고 `deletion-cancel`만 쓸 수 있다. 정리 배치(`ScheduledJobs`, 시간당)가 유예가 지난 계정의 Workspace 콘텐츠를 FK 순서대로 삭제하고, `security_audit_logs`의 사용자 연결을 끊고(`actor_user_id`/`workspace_id`를 비움) `users`를 지우며 `ACCOUNT_PURGED`를 남긴다.
+- **영구 삭제 (`POST /nodes/{id}/permanent-delete` + `X-Reauth-Token`, `purpose=NODE_PERMANENT_DELETE`, `targetId`=Node):** `TRASHED`가 아니면 `409 INVALID_NODE_STATE`, 다른 Workspace는 404. DB cascade로 subtype·태그·즐겨찾기·관계·뷰가 함께 지워지고 `activity_logs`에는 id와 동작만 남는다(제목 등 내용은 남기지 않음). 휴지통 30일 경과 항목은 같은 로직의 배치가 지운다.
+- **Export (`POST /exports`, `GET /exports`, `GET /exports/{jobId}`, `GET /exports/{jobId}/download?token=`):** `POST`는 재인증(`EXPORT_CREATE`) → 진행 중 job 확인(`409 EXPORT_IN_PROGRESS`, 사용자당 활성 job 하나는 부분 유니크 인덱스 `uq_export_jobs__active_per_user`가 DB에서도 보장) → rate limit(10분 간격, 429) → 소비 → 삽입 순서이고 `202 {jobId,status:"PENDING"}`다. `GET /exports`(최근 job 목록)는 새로고침 뒤에도 진행 상황을 이어 보여 주려는 **보조 조회**로 이 단계에서 추가했다. `GET /exports/{jobId}`는 **조회할 때마다 새 일회성 다운로드 토큰을 발급하고 이전 토큰은 무효화**한다(토큰은 해시로만 저장, 15분 TTL). 완료 후 `expires_at`이 지나면 배치 전이라도 `410`이다. 다운로드 endpoint는 Bearer 없이 토큰만으로 열리며(브라우저 링크) 잘못되었거나 만료·사용된 토큰은 모두 `404`, 성공하면 `attachment`+`no-store`로 스트리밍하고 **다운로드가 끝나면 파일을 즉시 지우고 job을 `EXPIRED`로 바꾼다**(§21.5의 "다운로드 완료 후 1시간"보다 엄격). 감사 로그 `EXPORT_DOWNLOAD`에는 토큰을 남기지 않는다.
+- **Export 처리:** 별도 worker 없이 Spring `@Scheduled` 폴러(3초)가 `FOR UPDATE SKIP LOCKED`로 job을 하나씩 가져간다. 실패는 최대 2회 재시도 후 `FAILED`(`failureReason`은 `EXPORT_FAILED`·`EXPORT_TOO_LARGE`만, 내부 경로·예외 문구는 노출하지 않음)이고 **크기 한도(기본 250MB) 초과는 재시도 없이 즉시 확정**한다. 15분 넘게 `PROCESSING`인 job은 5분 주기 정리 배치가 대기열로 되돌리거나(재시도 한도 초과면 `FAILED`) 어떤 job도 가리키지 않는 2시간 넘은 임시 파일을 지운다.
+- **Export ZIP 형식 (`manifest.json` `schemaVersion "1.0"`):** `nodes/<type>/<id>.md`(JSON 문자열로 인용한 YAML frontmatter — 제목의 `"`·`---`·줄바꿈이 구조를 깨지 않는다 — + 본문; Error는 본문의 ``` 와 충돌하지 않는 울타리로 메시지를 감싼다), `snippets/<nodeId>/v<N>.<확장자>`(**모든 버전의 원문을 줄바꿈·탭·이모지까지 그대로**), `relations.json`·`tags.json`·`favorites.json`, 마지막에 `manifest.json`(`schemaVersion`, `generatedByAppVersion`, `includeArchived`, 파일별 `sha256`/`bytes`, `counts`). 휴지통 Node와 그에 연결된 관계, 다른 사용자 데이터는 포함하지 않고 보관 Node는 `includeArchived=true`일 때만 포함한다. **양 끝 Node가 모두 포함된 관계만** 담는다. `export_jobs.manifest_checksum`은 `manifest.json`의 sha256이다.
+- **Rate limit (`devgraph.rate-limit.*`, 단일 인스턴스 in-memory 슬라이딩 윈도우):** 로그인 실패 5/분(키 `이메일 해시+IP 대역`, 성공하면 초기화 — **한도에 걸린 동안은 올바른 비밀번호도 429**), 재인증·비밀번호 확인 실패 5/분(사용자 기준), 검색 60/분, 변경 요청(POST/PUT/PATCH/DELETE) 120/분(둘 다 인증된 사용자 기준, `RateLimitFilter`), Export 10분 간격. 초과는 `429 RATE_LIMITED` + `Retry-After`다. §17.6의 "점진 지연"은 구현하지 않았다. 카운터는 프로세스 메모리에 있어 재시작하면 초기화된다.
+- **프론트엔드:** `/settings`(비밀번호 변경, 로그인된 기기 목록·로그아웃, Export 생성→재인증→진행→다운로드, 계정 삭제 요청)와 공통 `ReauthDialog`(네이티브 `<dialog>`, 비밀번호는 저장하지 않음), 휴지통 항목의 "영구 삭제", 제한 계정 전용 화면(`MUST_CHANGE_PASSWORD`면 비밀번호 변경, `DELETION_PENDING`이면 삭제 취소와 로그아웃만 — 일반 화면으로 이동 불가). 다운로드 링크는 서버가 주는 절대 URL에서 경로·query만 써서 같은 origin으로 연다.
 
 **Phase 6 구현 범위와 세부 계약(v1.9 확정)**
 
@@ -1426,7 +1440,7 @@ PostgreSQL RLS는 defense-in-depth로 유효하지만 JPA transaction마다 sess
 - Access JWT: 10~15분, 서명 key rotation 가능한 `kid`, 최소 claim(`sub`, `sid`, issued/expiry)만 포함한다. **`sid` = `auth_session_families.id`**(아래 참고)이며, refresh rotation으로 `auth_sessions.id`가 바뀌어도 `sid`는 로그인부터 로그아웃까지 동일하게 유지된다.
 - Refresh Token: 7~30일 정책, `HttpOnly; Secure; SameSite=Lax/Strict; Path=/api/v1/auth`, DB에는 SHA-256 등 단방향 hash만 저장한다.
 - Rotation: refresh마다 이전 token 폐기, 이미 회전된 token 재사용 시 family 전체 폐기.
-- **미결 결정 — refresh 응답 유실(v1.6, 브라우저 E2E에서 확인):** 서버가 refresh를 처리해 token을 회전했지만 응답(새 쿠키)이 브라우저에 도달하기 전에 페이지 이동·탭 닫기·네트워크 끊김이 발생하면, 브라우저는 이미 회전된 옛 token으로 다음 refresh를 보내 **재사용 감지가 발동하고 정상 사용자의 세션 family가 폐기되어 다시 로그인해야 한다**(재현: 로드 직후 refresh가 진행 중일 때 곧바로 다른 URL로 이동). 현재는 유예 없이 즉시 폐기하는 계약(AUTH-03)을 그대로 구현했다. 보통은 "직전에 회전된 token을 짧은 유예(예: 10초) 안에서만 한 번 더 받아 재발급하고, 유예 이후의 재사용만 폐기"하는 방식으로 완화한다. 이 경우 §17.2의 재사용 감지 강도와 `security_audit_logs` 기록 방식이 바뀌므로 Phase 7(보안 하드닝) 전에 결정한다.
+- **결정 — refresh 응답 유실(v2.0 확정, 10초 유예):** 서버가 refresh를 처리해 token을 회전했지만 응답이 브라우저에 닿기 전에 페이지 이동·탭 닫기·네트워크 끊김이 발생하면 브라우저는 이미 회전된 옛 token을 다시 보낸다(v1.6 E2E에서 확인). **직전 token이 회전 후 10초(`devgraph.auth.refresh-grace`) 안에 다시 오고, 그 후속 token이 아직 한 번도 쓰이지 않았다면**(= 회전 사슬에서 직전 token일 때만) 후속 token을 다시 회전해 새 token을 준다(응답이 사라진 token은 폐기된다). 그 밖의 재사용 — 유예 경과, 후속 token이 이미 쓰임, 그보다 오래된 token, 폐기된 token — 은 이전처럼 `TOKEN_REUSED`로 family 전체를 폐기한다. 감수하는 약점: 탈취자가 회전 직후 10초 안에 직전 token을 쓰면 정상 사용자의 다음 refresh가 재사용으로 판정되어 그 시점에 family가 폐기되므로 탈취는 여전히 한 번 안에 드러나지만, 10초 동안은 탈취자 세션이 유효할 수 있다. 유예 내 재사용은 `AUTH_REFRESH` 성공으로만 기록되며 별도 이벤트는 없다.
 - Logout/Password change(다른 세션 전체 폐기 선택 시)/탈퇴는 session(family)을 폐기한다.
 - 브라우저 Access Token은 memory에 유지하고 새로고침 시 refresh endpoint로 복구한다.
 - **Access JWT는 무상태다** — family가 방금 폐기되어도 이미 발급된 Access JWT는 자신의 남은 TTL(최대 10~15분)까지는 유효하다. 이 한계를 감수하며, "즉시 차단"이 필요해지면 그때 짧은 revocation deny-list 도입을 검토한다(지금은 만들지 않는다 — 측정된 요구 없이 추가하는 복잡도).
@@ -1505,8 +1519,9 @@ RETURNING id;
 
 - Access JWT에 `restriction` claim을 추가한다: `NONE`(기본) | `MUST_CHANGE_PASSWORD` | `DELETION_PENDING`. 로그인·refresh 시 서버가 `users.must_change_password`와 `users.status`를 조회해 채운다.
 - 전역 필터가 `restriction != NONE`이면 화이트리스트 엔드포인트 외 전부 `403 ACCOUNT_RESTRICTED`로 차단한다.
-  - `MUST_CHANGE_PASSWORD` 화이트리스트: `PATCH /auth/password`, `POST /auth/logout`, `GET /auth/me`
-  - `DELETION_PENDING` 화이트리스트: `POST /account/deletion-cancel`, `POST /auth/logout`, `GET /auth/me`
+  - `MUST_CHANGE_PASSWORD` 화이트리스트: `PATCH /auth/password`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`
+  - `DELETION_PENDING` 화이트리스트: `POST /account/deletion-cancel`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`
+  - `POST /auth/refresh`가 화이트리스트에 있어야 하는 이유(v2.0, 브라우저 E2E에서 확인): refresh는 쿠키로 인증하지만 브라우저 클라이언트는 제한이 찍힌 현재 Access JWT도 함께 보낸다. 막으면 제한을 푸는 동작 뒤에 새 토큰을 받을 방법이 없어 제한이 영영 풀리지 않는다. 새 토큰의 `restriction`은 서버가 매번 users 상태에서 다시 계산한다.
 - 제한을 해제하는 동작(비밀번호 변경 성공, 탈퇴 취소 성공) 자체는 `restriction`이 찍힌 현재 Access JWT를 바꾸지 못한다 — Access JWT는 무상태이기 때문이다(§17.2 access token 한계와 동일). 프론트엔드는 두 성공 응답을 받으면 즉시 `POST /auth/refresh`를 호출해 `restriction: NONE`이 반영된 새 Access JWT를 받는다.
 
 ### 17.3 CSRF/XSS/Injection
@@ -1558,6 +1573,7 @@ CSRF 방식은 **double-submit cookie**로 확정한다(다른 방식은 채택�
 - 단일 인스턴스 MVP는 in-memory limiter로 시작할 수 있지만 다중 인스턴스 전환 시 Redis 등 공유 저장소가 필요하다.
 - Export는 §17.2의 `reauthToken`을 요구하고, 일회성 짧은 만료 download URL을 사용한다(§9.8, §12.3 `export_jobs`).
 - Export 임시 파일은 암호화된 임시 저장소/권한 제한 디렉터리에 두고 만료 후 삭제한다.
+- **구현 값(v2.0, 상세는 §14.6 Phase 7):** 로그인 실패 5/분(이메일+IP 대역), 재인증 실패 5/분, 검색 60/분, 변경 120/분, Export 10분 간격. 점진 지연은 구현하지 않았다. 임시 파일 암호화도 구현하지 않았다(권한 제한 디렉터리·즉시 삭제로 대신하며, 호스트 디스크 암호화에 의존한다).
 
 ### 17.7 응답 보안 헤더
 
@@ -1573,6 +1589,8 @@ CSRF 방식은 **double-submit cookie**로 확정한다(다른 방식은 채택�
 | `Permissions-Policy` | `geolocation=(), camera=(), microphone=()` | 불필요한 브라우저 권한 API 비활성화 |
 
 CSP는 Monaco/React Flow가 요구하는 inline style을 허용해야 하면 `style-src`에 한해 완화하고, `script-src`는 완화하지 않는다.
+
+**구현(v2.0):** 헤더는 두 곳이 서로 다른 응답을 맡는다 — `/api/*` 응답은 Spring Security가, SPA 정적 응답은 nginx(`location /`)가 붙이고 nginx는 `/api` 응답에 헤더를 더하지 않는다(중복 방지, prod 스택에서 응답마다 한 번만 붙음을 확인). 정적 응답의 CSP에는 Monaco를 위해 `worker-src 'self' blob:`와 `font-src 'self' data:`가 추가된다(`script-src`는 `'self'` 그대로). HSTS는 Spring이 HTTPS 요청(`X-Forwarded-Proto`)에만 붙인다. API 응답은 `Cache-Control: no-store`, nginx는 해시된 `/assets/*`만 장기 캐시하고 `index.html`은 `no-cache`다.
 
 ### 17.8 출시 형태와 인증 완성도 결정
 
@@ -1665,7 +1683,7 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - 완료 조건: v1 생성, 코드 수정 시 v2, metadata 수정 시 불필요한 version 미생성, 이전 원문 조회 가능.
 - **구현 결과(v1.6):** 범위를 구현했고 통과한다 — 백엔드 통합 테스트(원문 그대로 왕복(CRLF·탭·이모지), v1→v2 및 메타데이터 변경 시 버전 미생성, 이전 원문 조회, 바이트 기준 512 KB 경계, NUL·잘못된 문자, secret 확인/재확인/재스캔, 동시 수정 시 승자 1명·버전 번호 연속, 동시 복사 카운트 원자성, 필터·cursor, Library 분리, 다른 Workspace 접근, 활동 로그, 위험 문자열의 JSON 전용 응답, §12.3 정합성 SQL), `SecretScanner` 단위 테스트, Playwright E2E(정확한 클립보드 복사, v1/v2와 버전 이력·이전 원문 복사, `<script>`/`onerror` 코드가 텍스트로만 표시되고 실행되지 않음, secret 경고·수정·확인 저장, URL 필터).
 - **구현·검증 중 발견해 수정한 결함:** ① 512 KB 한 줄 입력에서 secret 스캔 정규식이 O(n²)로 폭주해 요청이 멈추던 문제(창 단위 스캔으로 해결, 회귀 테스트 추가), ② `DB_PASSWORD=`처럼 접두어가 붙은 환경변수 형태를 놓치던 문제(`\b`가 `_` 뒤를 경계로 보지 않음), ③ Hibernate 스키마 검증이 `CHAR(64)` 컬럼과 String 매핑 불일치로 기동을 막던 문제. E2E 자체의 결함도 고쳤다: 즉시 통과하는 `toHaveCount(0)` 뒤 곧바로 이동해 진행 중인 refresh를 끊는 경합, 비동기 태그 생성 완료 전에 저장하는 경합.
-- **이월/미정의 항목:** ① refresh 응답 유실 시 family 폐기(§17.2 미결 결정). ② diff endpoint(SNP-07), Snippet의 `relations[]`와 연결 Node 표시(Phase 4), 코드 검색·trigram 사용(Phase 5; 인덱스 `ix_snippet_versions__code_trgm`만 선행 생성, SRCH-02는 현재 버전만 조회 단계에서 제한). ③ 고엔트로피 secret 감지. ④ 사용 통계 rate limit. ⑤ `snippet_versions`의 `pg_trgm` 확장(`CREATE EXTENSION`)은 DB 권한이 필요하다 — 운영 배포 절차(§21.7)에서 확인할 것. ⑥ Monaco/Shiki 번들은 지연 로딩되지만(메인 번들 제외) TypeScript worker가 약 7 MB로 크다 — 필요 시 언어 서비스를 줄인다.
+- **이월/미정의 항목:** ① (해결됨 — v2.0에서 10초 유예 구현). ② diff endpoint(SNP-07), Snippet의 `relations[]`와 연결 Node 표시(Phase 4), 코드 검색·trigram 사용(Phase 5; 인덱스 `ix_snippet_versions__code_trgm`만 선행 생성, SRCH-02는 현재 버전만 조회 단계에서 제한). ③ 고엔트로피 secret 감지. ④ 사용 통계 rate limit. ⑤ `snippet_versions`의 `pg_trgm` 확장(`CREATE EXTENSION`)은 DB 권한이 필요하다 — 운영 배포 절차(§21.7)에서 확인할 것. ⑥ Monaco/Shiki 번들은 지연 로딩되지만(메인 번들 제외) TypeScript worker가 약 7 MB로 크다 — 필요 시 언어 서비스를 줄인다.
 
 ### Phase 4 — Relation & Knowledge Graph
 
@@ -1711,6 +1729,30 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - DB: `export_jobs`(§12.3, MVP+ 아니라 1.0 필수), retention indexes, backup/restore rehearsal.
 - 테스트: load, OWASP 체크, backup restore, account purge, Playwright critical suite.
 - 완료 조건: 운영 runbook, 실제 restore rehearsal, security checklist, NFR 측정 보고서가 있다.
+
+#### Phase 7 구현 결과 (v2.0)
+
+**구현·검증됨**
+
+- Backend: 재인증 토큰(세션 귀속·일회성·원자적 소비)과 비밀번호 변경, 관리자 CLI 강제 초기화(`--spring.main.web-application-type=none --admin.command=force-password-reset --admin.email=…`, 임시 비밀번호는 표준 출력에만 한 번), 계정 제한 상태 필터, 계정 탈퇴/취소/정리, Node 영구 삭제와 휴지통 30일 정리, 보존 배치(activity 180일·audit 365일·재인증 토큰), rate limit, 보안 응답 헤더, 요청 로그(구조화 JSON)·health 그룹·지표, `export_jobs`(V10)와 비동기 Export 전 과정. 상세 계약은 §14.6.
+- Frontend: `/settings`, `ReauthDialog`, 영구 삭제, 제한 계정 화면, 360px 반응형 보정, 전역 `:focus-visible`.
+- 테스트: 백엔드 133개(통합·단위)가 embedded PostgreSQL 14와 **Testcontainers PostgreSQL 16 양쪽에서 통과**, Playwright 26개가 개발 서버와 **prod compose 스택(nginx 뒤, `prod` 프로파일)** 양쪽에서 통과. Phase 7 핵심 시나리오(비밀번호 변경·세션, Export 재인증→다운로드→만료, 영구 삭제, 탈퇴→로그인→취소, axe 접근성과 360px 가로 스크롤)가 포함된다. `ApiAuthSweepIntegrationTest`는 모든 `/api/v1` 매핑이 공개 목록 외 인증을 요구함을 자동 검증한다.
+- 운영: `docker-compose.prod.yml`, `scripts/backup.sh`·`restore.sh`·`restore-rehearsal.sh`, `docs/RUNBOOK.md`, **실제 복원 리허설**(103MB DB, 23개 테이블 행 수·내용 해시 일치, 복원본 로그인), `docs/SECURITY_CHECKLIST.md`, `docs/NFR_REPORT.md`(§22.1 조건 포함).
+- NFR-01 측정(28k Node/109k Relation, 20 VU, warm, 같은 호스트): 목록 p95 174ms, 상세 178ms, 검색 509ms, focus graph 197ms — 모두 목표 이내. **측정 전에는 검색이 미달**(p95 3.66s)이었고 원인(순위 함수를 FTS 비해당 후보에도 계산)을 고쳤다.
+- 보안 점검: Trivy 기준 backend 의존성·OS 패키지 CRITICAL/HIGH 0(Tomcat 11.0.26, BouncyCastle 1.86, Jackson 3.1.7/2.21.7로 상향 — Boot BOM이 관리하는 값을 `build.gradle`에서 override), 프론트 prod 의존성 critical/high 0.
+
+**구현 중 발견·수정한 결함**
+
+- 제한 세션이 `POST /auth/refresh`로 제한을 풀지 못함(화이트리스트에 없었음) → §17.2.3에 명시·수정, 통합 테스트의 refresh 헬퍼가 브라우저처럼 Bearer를 함께 보내도록 바꿈.
+- 관리자 CLI(웹 서버 없는 컨텍스트)가 `HttpSecurity` 빈이 없어 기동 실패 → `SecurityConfig`를 서블릿 웹 앱 전용으로 제한하고 컨텍스트 기동 회귀 테스트 추가.
+- 기존 `eclipse-temurin:*-alpine` Dockerfile은 arm64 이미지가 없어 Apple Silicon에서 빌드 불가 → 멀티 아키텍처 이미지로 교체.
+- 복원 리허설 스크립트의 지문 계산 루프가 stdin을 삼켜 원본 쪽 테이블을 하나만 비교하던 문제(불일치로 드러나 수정).
+
+**이월/미구현 (알려진 제한)**
+
+- 백업 암호화·오프사이트 전송, 복원 시 탈퇴 tombstone 재적용, 저장소 시크릿 이력 스캔, 동적 스캔(ZAP)·침투 테스트, 스크린 리더 수동 점검, Lighthouse(실제 네트워크 조건 LCP), soak/쓰기 부하/50 VU/대용량 Export 측정, 점진 지연(§17.6), 지표 수집 파이프라인(Prometheus)은 하지 않았다. 기반 이미지 내 `pebble`(Go 바이너리) HIGH 14건이 남아 있다(우리가 실행하지 않음).
+- 단일 인스턴스 전제: rate limit 카운터는 메모리에 있다. 이미 발급된 Access Token은 최대 15분 동안 유효하다(stateless).
+- CI는 이번 단계에서 바꾸지 않았다(백엔드 `./gradlew build`, 프론트 lint/test/build). 이미지 취약점 스캔과 prod 스택 E2E는 수동 실행이다.
 
 ### Phase 8 — 고도화
 
@@ -1802,6 +1844,8 @@ Docker Compose 서비스:
 
 Redis, worker, object storage는 초기 기본 구성에 넣지 않는다.
 
+**구현(v2.0):** `docker-compose.prod.yml`(postgres·backend·frontend). `postgres`/`backend`는 호스트 포트를 열지 않고 `frontend`(nginx)만 노출하며, TLS는 앞단이 끝낸다고 가정한다. backend는 `SPRING_PROFILES_ACTIVE=prod`(JSON 로그, 쿠키 Secure, `server.forward-headers-strategy=native`로 nginx가 넘긴 클라이언트 IP 사용, API 문서 비활성), nginx는 `X-Forwarded-For`를 **자기가 본 주소로 덮어써서** 클라이언트가 위조한 값을 믿지 않는다. 이미지는 arm64에서도 빌드되도록 멀티 아키텍처 기본 이미지를 쓰고 빌드 때마다 OS 보안 패치를 적용한다. 운영 절차는 `docs/RUNBOOK.md`.
+
 ### 21.2 환경 변수
 
 - `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`
@@ -1810,16 +1854,20 @@ Redis, worker, object storage는 초기 기본 구성에 넣지 않는다.
 - `ALLOWED_ORIGINS`, `COOKIE_SECURE`, `PUBLIC_BASE_URL`
 - `EXPORT_TEMP_DIR`, `MAX_EXPORT_SIZE_MB`
 - `LOG_LEVEL`, `MANAGEMENT_ENDPOINTS`
+- (v2.0 추가) `APP_VERSION`(Export manifest), `HTTP_PORT`(compose), `DEVGRAPH_RATE_LIMIT_*`·`DEVGRAPH_RETENTION_*`(relaxed binding으로 §17.6/§21.5 값을 덮어씀)
 
 `.env.example`에는 가짜 값과 설명만 두고 실제 secret을 commit하지 않는다. 운영에서는 플랫폼 secret store 또는 root만 읽을 수 있는 env file을 사용한다.
 
 ### 21.3 Logging/Monitoring/Health
 
 - 운영 로그: JSON, `timestamp/level/service/traceId/userIdHash/path/status/durationMs/errorCode`
+  - **구현(v2.0):** `prod` 프로파일은 ECS JSON 한 줄(`@timestamp`, `log.level`, `service.name`, `message`)이고 MDC의 `traceId`·`userIdHash`(사용자 id의 SHA-256 앞 12자리)·`status`·`durationMs`·`errorCode`가 같은 줄에 필드로 붙는다. 요청 로그 메시지는 `METHOD path -> status ms`이며 **query는 기록하지 않는다**. `traceId`는 서버가 요청마다 새로 만들고(클라이언트가 보낸 `X-Request-Id`는 무시) 응답 헤더 `X-Request-Id`와 오류 본문 `traceId`로 돌려준다. `/actuator/*` 프로브 요청은 로그에 남기지 않는다. 테스트가 비밀번호·토큰·검색어·이메일이 로그에 나오지 않음을 검사한다.
 - 금지: request/response 전체, Authorization/Cookie, 비밀번호, code/body, export 내용
 - `/actuator/health/liveness`: JVM process 상태
 - `/actuator/health/readiness`: PostgreSQL 연결과 필수 migration 상태
+  - **구현(v2.0):** readiness 그룹 = `readinessState` + `db` + `migration`(적용되지 않은 Flyway migration이 있으면 DOWN). 상세는 노출하지 않는다(`show-details: never`). nginx는 외부에 `liveness`만 연다.
 - metrics: API latency/error rate, DB pool, JVM, graph node count/truncation, search duration/zero-result, export failure
+- **구현(v2.0):** 지표는 수집하지만(`devgraph.graph.nodes`·`devgraph.graph.truncated`(kind 태그), `devgraph.search.*`, `devgraph.export.*`, JVM/DB pool/HTTP는 Micrometer 기본) **수집·조회 경로는 만들지 않았다** — `/actuator`는 기본으로 `health`·`info`만 노출하고(`MANAGEMENT_ENDPOINTS`) Prometheus 등 scrape는 이 단계에 없다. 지표가 필요해지면 `MANAGEMENT_ENDPOINTS`와 내부 네트워크 전용 scrape를 추가한다.
 - 초기 모니터링은 Actuator + structured logs + 간단한 uptime check로 시작한다. Prometheus/Grafana는 지속 운영 또는 분석 필요가 생길 때 추가한다.
 
 ### 21.4 Backup/Restore
@@ -1829,6 +1877,7 @@ Redis, worker, object storage는 초기 기본 구성에 넣지 않는다.
 - 최소 7일 보존, 가능하면 30일; 비용과 개인정보 정책에 따라 확정
 - 월 1회 별도 환경 restore rehearsal
 - backup 존재가 아니라 restore 성공과 row count/checksum/sample login을 확인해야 완료다.
+- **구현(v2.0):** `scripts/backup.sh`(pg_dump custom format, 권한 600, 목차 검증, 7일 지난 덤프 삭제), `scripts/restore.sh`(파괴적, `--yes` 필요), `scripts/restore-rehearsal.sh`(운영 DB를 건드리지 않는 리허설: 일회용 PostgreSQL 16에 복원 → **테이블별 행 수와 내용 해시를 원본과 비교** → 같은 backend 이미지를 복원본에 붙여 실제 로그인·조회). 2026-10-01 실측: 103MB DB(28k Node/109k Relation) 복원 3초, 23개 테이블 전부 일치, 로그인 성공(`docs/NFR_REPORT.md`). 백업의 암호화·오프사이트 전송, backup 복원 시 탈퇴 tombstone 재적용 절차는 구현하지 않았다.
 - 사용자 Export는 운영 backup을 대체하지 않는다.
 
 ### 21.5 데이터 삭제와 보존

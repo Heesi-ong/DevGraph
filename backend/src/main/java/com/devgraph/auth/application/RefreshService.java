@@ -14,6 +14,7 @@ import com.devgraph.auth.infrastructure.AuthSessionJpaEntity;
 import com.devgraph.auth.infrastructure.AuthSessionRepository;
 import com.devgraph.auth.infrastructure.RevokeReason;
 import com.devgraph.common.error.ApiException;
+import com.devgraph.common.security.AuthProperties;
 import com.devgraph.common.security.TokenHasher;
 
 /**
@@ -28,9 +29,12 @@ public class RefreshService {
 	private final AuthSessionFamilyRepository familyRepository;
 	private final SessionIssuanceService sessionIssuanceService;
 	private final SecurityAuditService securityAuditService;
+	private final AuthProperties authProperties;
 
 	public RefreshService(AuthSessionRepository sessionRepository, AuthSessionFamilyRepository familyRepository,
-			SessionIssuanceService sessionIssuanceService, SecurityAuditService securityAuditService) {
+			SessionIssuanceService sessionIssuanceService, SecurityAuditService securityAuditService,
+			AuthProperties authProperties) {
+		this.authProperties = authProperties;
 		this.sessionRepository = sessionRepository;
 		this.familyRepository = familyRepository;
 		this.sessionIssuanceService = sessionIssuanceService;
@@ -60,21 +64,36 @@ public class RefreshService {
 			family.revoke(RevokeReason.ABSOLUTE_EXPIRED);
 			throw fail(userId, "SESSION_ABSOLUTE_EXPIRED", ipPrefix);
 		}
-		if (session.getRevokedAt() != null || session.getRotatedAt() != null) {
-			// 이미 소모된(rotate/revoke된) 토큰이 다시 제출됨 — 탈취 의심. family 전체를 폐기한다.
+		AuthSessionJpaEntity base = session;
+		if (isGraceReplay(session)) {
+			// 응답 유실로 직전 토큰이 다시 왔다. 아직 쓰이지 않은 후속 토큰(응답이 사라진 것)을 대신 회전해 새 토큰을 준다.
+			base = sessionRepository.findTop2ByFamilyIdOrderByCreatedAtDesc(family.getId()).get(0);
+		} else if (session.getRevokedAt() != null || session.getRotatedAt() != null) {
+			// 이미 소모된(rotate/revoke된) 토큰이 유예 밖에서 다시 제출됨 — 탈취 의심. family 전체를 폐기한다.
 			family.revoke(RevokeReason.REUSE_DETECTED);
 			throw fail(userId, "TOKEN_REUSED", ipPrefix);
 		}
-		if (Instant.now().isAfter(session.getExpiresAt())) {
+		if (Instant.now().isAfter(base.getExpiresAt())) {
 			// 단순 시간 만료 — 탈취 신호가 아니다. family를 REUSE_DETECTED로 몰지 않는다.
 			throw fail(userId, "TOKEN_EXPIRED", ipPrefix);
 		}
 
-		session.markRotated();
+		base.markRotated();
 		family.touchRotation();
 		IssuedTokens tokens = sessionIssuanceService.issueRotation(family, ipPrefix);
 		securityAuditService.record(userId, "AUTH_REFRESH", "SUCCESS", ipPrefix);
 		return tokens;
+	}
+
+	/** 직전 토큰이 유예 시간 안에 다시 왔고, 그 후속 토큰이 아직 한 번도 쓰이지 않았을 때만 true. */
+	private boolean isGraceReplay(AuthSessionJpaEntity session) {
+		if (session.getRevokedAt() != null || session.getRotatedAt() == null
+				|| Instant.now().isAfter(session.getRotatedAt().plus(authProperties.getRefreshGrace()))) {
+			return false;
+		}
+		var newest = sessionRepository.findTop2ByFamilyIdOrderByCreatedAtDesc(session.getFamilyId());
+		return newest.size() == 2 && newest.get(1).getId().equals(session.getId()) && newest.get(0).getRotatedAt() == null
+				&& newest.get(0).getRevokedAt() == null;
 	}
 
 	private ApiException fail(UUID userId, String code, String ipPrefix) {

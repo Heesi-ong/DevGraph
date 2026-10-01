@@ -5,3 +5,20 @@ spring:
 devgraph:
   cookie:
     secure: true
+
+# 운영 로그는 JSON 한 줄(ECS)로 내보내 수집기가 MDC(traceId, userIdHash, status, durationMs, errorCode)를 필드로 읽게 한다.
+logging:
+  structured:
+    format:
+      console: ecs
+
+server:
+  # nginx 뒤에서 실제 클라이언트 IP(X-Forwarded-For)와 https 여부(X-Forwarded-Proto)를 쓴다. Tomcat은 사설망 proxy가 보낸 헤더만 믿는다.
+  forward-headers-strategy: native
+
+# 운영에서는 API 문서를 열지 않는다.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

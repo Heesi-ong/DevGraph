@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,10 +25,14 @@ import com.devgraph.auth.application.AuthResult;
 import com.devgraph.auth.application.IssuedTokens;
 import com.devgraph.auth.application.LoginService;
 import com.devgraph.auth.application.MeQueryService;
+import com.devgraph.auth.application.PasswordService;
+import com.devgraph.auth.application.ReauthService;
 import com.devgraph.auth.application.RefreshService;
 import com.devgraph.auth.application.SessionManagementService;
 import com.devgraph.auth.application.SignupService;
 import com.devgraph.auth.infrastructure.AuthSessionFamilyJpaEntity;
+import com.devgraph.auth.infrastructure.AuthSessionJpaEntity;
+import com.devgraph.auth.infrastructure.AuthSessionRepository;
 import com.devgraph.auth.infrastructure.RevokeReason;
 import com.devgraph.common.error.ApiException;
 import com.devgraph.common.security.AuthCookies;
@@ -47,15 +52,22 @@ public class AuthController {
 	private final MeQueryService meQueryService;
 	private final SessionManagementService sessionManagementService;
 	private final AuthCookies authCookies;
+	private final AuthSessionRepository sessionRepository;
+	private final PasswordService passwordService;
+	private final ReauthService reauthService;
 
 	public AuthController(SignupService signupService, LoginService loginService, RefreshService refreshService,
-			MeQueryService meQueryService, SessionManagementService sessionManagementService, AuthCookies authCookies) {
+			MeQueryService meQueryService, SessionManagementService sessionManagementService, AuthCookies authCookies,
+			PasswordService passwordService, ReauthService reauthService, AuthSessionRepository sessionRepository) {
 		this.signupService = signupService;
 		this.loginService = loginService;
 		this.refreshService = refreshService;
 		this.meQueryService = meQueryService;
 		this.sessionManagementService = sessionManagementService;
 		this.authCookies = authCookies;
+		this.sessionRepository = sessionRepository;
+		this.passwordService = passwordService;
+		this.reauthService = reauthService;
 	}
 
 	@PostMapping("/signup")
@@ -97,7 +109,23 @@ public class AuthController {
 		WorkspaceResponse workspace = me.workspace() == null ? null
 				: new WorkspaceResponse(me.workspace().id(), me.workspace().name(), me.workspace().slug());
 		return new MeResponse(new UserResponse(me.user().getId(), me.user().getEmail(), me.user().getDisplayName()),
-				workspace);
+				workspace, user.restriction());
+	}
+
+	@PatchMapping("/password")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void changePassword(@AuthenticationPrincipal AuthenticatedUser user,
+			@Valid @RequestBody ChangePasswordRequest request, HttpServletRequest http) {
+		passwordService.change(user.userId(), user.familyId(), request.currentPassword(), request.newPassword(),
+				Boolean.TRUE.equals(request.revokeOtherSessions()), IpPrefixExtractor.from(http));
+	}
+
+	@PostMapping("/reauth")
+	public ReauthResponse reauth(@AuthenticationPrincipal AuthenticatedUser user,
+			@Valid @RequestBody ReauthRequest request, HttpServletRequest http) {
+		ReauthService.Issued issued = reauthService.issue(user, request.password(), request.purpose(),
+				request.targetId(), IpPrefixExtractor.from(http));
+		return new ReauthResponse(issued.token(), issued.purpose().name(), issued.expiresAt());
 	}
 
 	@GetMapping("/sessions")
@@ -135,8 +163,10 @@ public class AuthController {
 	}
 
 	private SessionSummaryResponse toSummary(AuthSessionFamilyJpaEntity family, UUID currentFamilyId) {
+		String ipPrefix = sessionRepository.findFirstByFamilyIdOrderByCreatedAtDesc(family.getId())
+				.map(AuthSessionJpaEntity::getIpPrefix).orElse(null);
 		return new SessionSummaryResponse(family.getId(), family.getId().equals(currentFamilyId),
-				family.getDeviceLabel(), family.getCreatedAt(), family.getLastRotatedAt(),
+				family.getDeviceLabel(), ipPrefix, family.getCreatedAt(), family.getLastRotatedAt(),
 				family.getAbsoluteExpiresAt());
 	}
 }

@@ -31,19 +31,26 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
 	@ExceptionHandler(ApiException.class)
 	public ResponseEntity<ApiError> handleApiException(ApiException ex) {
+		org.slf4j.MDC.put("errorCode", ex.getCode());
 		ApiError body = ApiError.of(ex.getCode(), ex.getMessage(), ex.getFieldErrors(), newTraceId());
-		return ResponseEntity.status(ex.getStatus()).body(body);
+		var response = ResponseEntity.status(ex.getStatus());
+		if (ex instanceof com.devgraph.common.ratelimit.RateLimitedException limited) {
+			response.header("Retry-After", Long.toString(limited.getRetryAfterSeconds()));
+		}
+		return response.body(body);
 	}
 
 	/** JPA @Version 충돌(동시 수정). 설계서 §9.2 KNOW-03 / §14.3 409 VERSION_CONFLICT. */
 	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
 	public ResponseEntity<ApiError> handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
+		org.slf4j.MDC.put("errorCode", "VERSION_CONFLICT");
 		return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiError.of("VERSION_CONFLICT",
 				"다른 위치에서 수정되었습니다. 최신 내용을 확인해 주세요.", newTraceId()));
 	}
 
 	@ExceptionHandler(Exception.class)
 	public ResponseEntity<ApiError> handleUnexpected(Exception ex) {
+		org.slf4j.MDC.put("errorCode", "INTERNAL_ERROR");
 		String traceId = newTraceId();
 		// 응답에는 내부 상세를 숨기지만, 원인을 추적할 수 있도록 traceId와 함께 반드시 로그를 남긴다.
 		log.error("Unhandled exception traceId={}", traceId, ex);
@@ -97,7 +104,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		};
 	}
 
+	/** 요청 로그(RequestLoggingFilter)와 같은 traceId를 응답에도 써서 사용자가 알려 준 id로 로그를 바로 찾는다. */
 	private static String newTraceId() {
-		return UUID.randomUUID().toString();
+		String current = org.slf4j.MDC.get("traceId");
+		return current != null ? current : UUID.randomUUID().toString();
 	}
 }

@@ -12,13 +12,17 @@ export interface CurrentWorkspace {
   slug: string
 }
 
+// 설계서 §17.2.3: 서버가 JWT restriction claim으로 알려 주는 제한 상태. 제한 세션은 허용 목록 API만 쓸 수 있다.
+export type Restriction = 'NONE' | 'MUST_CHANGE_PASSWORD' | 'DELETION_PENDING'
+
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
 
 interface AuthState {
   status: AuthStatus
   user: CurrentUser | null
   workspace: CurrentWorkspace | null
-  setAuthenticated: (user: CurrentUser, workspace: CurrentWorkspace | null) => void
+  restriction: Restriction
+  setAuthenticated: (user: CurrentUser, workspace: CurrentWorkspace | null, restriction?: Restriction) => void
   setAnonymous: () => void
 }
 
@@ -27,6 +31,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   status: 'loading',
   user: null,
   workspace: null,
-  setAuthenticated: (user, workspace) => set({ status: 'authenticated', user, workspace }),
-  setAnonymous: () => set({ status: 'anonymous', user: null, workspace: null }),
+  restriction: 'NONE',
+  setAuthenticated: (user, workspace, restriction = 'NONE') => set({ status: 'authenticated', user, workspace, restriction }),
+  setAnonymous: () => set({ status: 'anonymous', user: null, workspace: null, restriction: 'NONE' }),
 }))

@@ -1,9 +1,11 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import { transitionNode, type NodeTransition } from '../../entities/knowledge-node/api'
+import { useNavigate } from 'react-router-dom'
+import { permanentDeleteNode, transitionNode, type NodeTransition } from '../../entities/knowledge-node/api'
 import type { NodeStatus } from '../../entities/knowledge-node/types'
 import { useInvalidateRelationViews } from '../relations/useInvalidateRelationViews'
 import { toApiError } from '../../shared/api/errors'
+import { ReauthDialog } from '../reauth/ReauthDialog'
 
 interface Action {
   transition: NodeTransition
@@ -29,6 +31,8 @@ const ACTIONS: Record<NodeStatus, Action[]> = {
 export function StatusActions({ node }: { node: { id: string; version: number; status: NodeStatus } }) {
   const invalidate = useInvalidateRelationViews()
   const [message, setMessage] = useState<string | null>(null)
+  const [asking, setAsking] = useState(false)
+  const navigate = useNavigate()
 
   const run = useMutation({
     mutationFn: (transition: NodeTransition) => transitionNode(node.id, node.version, transition),
@@ -49,6 +53,16 @@ export function StatusActions({ node }: { node: { id: string; version: number; s
     },
   })
 
+  const purge = useMutation({
+    mutationFn: (token: string) => permanentDeleteNode(node.id, token),
+    onSuccess: () => {
+      // 삭제된 항목 화면을 먼저 떠난 뒤 캐시를 무효화한다. 반대로 하면 이미 없는 항목을 다시 읽다가 404 재시도에 막힌다.
+      navigate('/library', { replace: true })
+      void invalidate()
+    },
+    onError: (err) => setMessage(toApiError(err).message),
+  })
+
   return (
     <div>
       <div className="row">
@@ -65,7 +79,26 @@ export function StatusActions({ node }: { node: { id: string; version: number; s
             {action.label}
           </button>
         ))}
+        {node.status === 'TRASHED' && (
+          <button type="button" className="danger" disabled={purge.isPending} onClick={() => { setMessage(null); setAsking(true) }}>
+            영구 삭제
+          </button>
+        )}
       </div>
+      {asking && (
+        <ReauthDialog
+          purpose="NODE_PERMANENT_DELETE"
+          targetId={node.id}
+          title="영구 삭제"
+          description="이 항목과 연결된 관계, 버전 기록이 모두 삭제되며 되돌릴 수 없습니다. 계속하려면 비밀번호를 입력해 주세요."
+          confirmLabel="영구 삭제"
+          onCancel={() => setAsking(false)}
+          onToken={(token) => {
+            setAsking(false)
+            purge.mutate(token)
+          }}
+        />
+      )}
       {message && (
         <p role="alert" className="error-text">
           {message}

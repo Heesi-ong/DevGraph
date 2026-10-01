@@ -8,6 +8,7 @@ public record SessionSummaryResponse(
 		UUID id,
 		boolean current,
 		String deviceLabel,
+		String ipPrefix,
 		Instant createdAt,
 		Instant lastRotatedAt,
 		Instant absoluteExpiresAt

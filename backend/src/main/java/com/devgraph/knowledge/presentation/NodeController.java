@@ -3,6 +3,7 @@ package com.devgraph.knowledge.presentation;
 import java.util.List;
 import java.util.UUID;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 
@@ -16,15 +17,18 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.devgraph.common.security.AuthenticatedUser;
+import com.devgraph.common.web.IpPrefixExtractor;
 import com.devgraph.common.web.PageResponse;
 import com.devgraph.knowledge.application.FavoriteService;
 import com.devgraph.knowledge.application.NodeCommandService;
 import com.devgraph.knowledge.application.NodeDetail;
+import com.devgraph.knowledge.application.NodePurgeService;
 import com.devgraph.knowledge.application.NodeQueryService;
 import com.devgraph.knowledge.application.NodeSummary;
 import com.devgraph.knowledge.domain.NodeStatus;
@@ -49,12 +53,14 @@ public class NodeController {
 	private final NodeCommandService commandService;
 	private final NodeQueryService queryService;
 	private final FavoriteService favoriteService;
+	private final NodePurgeService purgeService;
 
 	public NodeController(NodeCommandService commandService, NodeQueryService queryService,
-			FavoriteService favoriteService) {
+			FavoriteService favoriteService, NodePurgeService purgeService) {
 		this.commandService = commandService;
 		this.queryService = queryService;
 		this.favoriteService = favoriteService;
+		this.purgeService = purgeService;
 	}
 
 	@PostMapping
@@ -120,5 +126,15 @@ public class NodeController {
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void removeFavorite(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id) {
 		favoriteService.remove(user.userId(), id);
+	}
+
+	/**
+	 * 영구 삭제(DATA-03). 휴지통의 Node만 가능하고 `X-Reauth-Token`(`NODE_PERMANENT_DELETE`, 대상 = 이 Node)이 필요하다.
+	 */
+	@org.springframework.web.bind.annotation.PostMapping("/{id}/permanent-delete")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void permanentDelete(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id,
+			@RequestHeader(value = "X-Reauth-Token", required = false) String reauthToken, HttpServletRequest http) {
+		purgeService.purgeByUser(user, id, reauthToken, IpPrefixExtractor.from(http));
 	}
 }

@@ -1,0 +1,7 @@
+# 측정 전용 override: 하나의 계정으로 20 user를 흉내 내므로 사용자별 rate limit을 풀어 둔다. rate limit 자체의 동작은
+# 같은 스택에서 별도로 확인한다(docs/NFR_REPORT.md). 운영에는 쓰지 않는다.
+services:
+  backend:
+    environment:
+      DEVGRAPH_RATE_LIMIT_SEARCH_PER_MINUTE: "100000"
+      DEVGRAPH_RATE_LIMIT_MUTATION_PER_MINUTE: "100000"

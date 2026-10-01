@@ -45,3 +45,8 @@ export async function setFavorite(id: string, favorite: boolean) {
     await apiClient.delete(`/nodes/${id}/favorite`)
   }
 }
+
+// 설계서 §14.3: 영구 삭제는 휴지통 항목만, 재인증 토큰(NODE_PERMANENT_DELETE, 대상 Node 일치)이 있어야 한다.
+export async function permanentDeleteNode(id: string, reauthToken: string) {
+  await apiClient.post(`/nodes/${id}/permanent-delete`, null, { headers: { 'X-Reauth-Token': reauthToken } })
+}

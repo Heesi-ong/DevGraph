@@ -233,10 +233,12 @@ public class SearchQueryRepository {
 				      coalesce(er.error_message ILIKE :lcontains ESCAPE '!', false) AS error_hit,
 				      (n.search_vector @@ q.tsq OR coalesce(er.search_vector @@ q.tsq, false)
 				          OR coalesce(sr.search_vector @@ q.tsq, false)) AS fts_hit,
-				      ts_rank_cd('{0,0,0,1}', n.search_vector, q.tsq, 34) AS title_rank,
-				      greatest(ts_rank_cd('{0,1,0,0}', n.search_vector, q.tsq, 34),
-				               coalesce(ts_rank_cd('{0,1,1,0}', er.search_vector, q.tsq, 34), 0),
-				               coalesce(ts_rank_cd('{0,1,1,0}', sr.search_vector, q.tsq, 34), 0)) AS body_rank) h
+				      -- ts_rank_cd는 비싸다(행당 수십 µs). 코드 일치처럼 FTS와 무관하게 후보가 된 행(예: 'public class'가 모든
+				      -- Snippet에 있는 경우)은 어차피 0이므로 @@ 로 먼저 거른다. 결과는 같고 20k+ 후보에서 10배 이상 빠르다.
+				      CASE WHEN n.search_vector @@ q.tsq THEN ts_rank_cd('{0,0,0,1}', n.search_vector, q.tsq, 34) ELSE 0 END AS title_rank,
+				      greatest(CASE WHEN n.search_vector @@ q.tsq THEN ts_rank_cd('{0,1,0,0}', n.search_vector, q.tsq, 34) ELSE 0 END,
+				               CASE WHEN er.search_vector @@ q.tsq THEN ts_rank_cd('{0,1,1,0}', er.search_vector, q.tsq, 34) ELSE 0 END,
+				               CASE WHEN sr.search_vector @@ q.tsq THEN ts_rank_cd('{0,1,1,0}', sr.search_vector, q.tsq, 34) ELSE 0 END) AS body_rank) h
 				  WHERE n.workspace_id = :ws AND n.status IN (:statuses)%s AND %s
 				) t""".formatted(score, filters, matchCondition);
 	}

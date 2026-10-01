@@ -19,7 +19,7 @@ export function SignupPage() {
     try {
       await signup(email, displayName, password)
       const meResponse = await me()
-      setAuthenticated(meResponse.user, meResponse.workspace)
+      setAuthenticated(meResponse.user, meResponse.workspace, meResponse.restriction)
       navigate('/', { replace: true })
     } catch (err) {
       // §14.1: 409는 EMAIL_UNAVAILABLE(중복 이메일 일반화 오류), 그 외는 400 검증 오류.

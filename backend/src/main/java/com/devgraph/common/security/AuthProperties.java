@@ -13,6 +13,8 @@ public class AuthProperties {
 	private Duration accessTokenTtl = Duration.ofMinutes(15);
 	private Duration refreshTokenTtl = Duration.ofDays(30);
 	private long sessionAbsoluteTtlDays = 90;
+	// §17.2: 회전 직후 응답이 유실되어 브라우저가 직전 토큰을 다시 보내는 경우를 이 시간 동안만 허용한다.
+	private Duration refreshGrace = Duration.ofSeconds(10);
 	private String jwtSigningKey = "";
 
 	public Duration getAccessTokenTtl() {
@@ -29,6 +31,14 @@ public class AuthProperties {
 
 	public void setRefreshTokenTtl(Duration refreshTokenTtl) {
 		this.refreshTokenTtl = refreshTokenTtl;
+	}
+
+	public Duration getRefreshGrace() {
+		return refreshGrace;
+	}
+
+	public void setRefreshGrace(Duration refreshGrace) {
+		this.refreshGrace = refreshGrace;
 	}
 
 	public long getSessionAbsoluteTtlDays() {

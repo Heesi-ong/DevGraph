@@ -97,3 +97,18 @@ body {
 .tabs [aria-selected="true"] { border-bottom: 2px solid var(--color-primary); font-weight: 600; }
 .warning-banner { border: 1px solid #ca8a04; border-radius: 6px; padding: var(--space-2); background: rgba(250, 204, 21, 0.15); }
 .mono { font-family: var(--font-mono); font-size: 0.85rem; }
+
+/* Phase 7 설정·재인증·제한 계정, 반응형·접근성 */
+.dialog { border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg); color: var(--color-fg); padding: var(--space-3); width: min(420px, calc(100vw - 32px)); }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.settings section { margin-bottom: var(--space-4); }
+.restricted { max-width: 420px; margin: 0 auto; padding: var(--space-4); }
+button.danger { border-color: var(--color-danger); color: var(--color-danger); }
+:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+@media (max-width: 700px) {
+  .shell-header { flex-wrap: wrap; padding: var(--space-2); }
+  .shell-header nav { flex-basis: 100%; order: 3; }
+  .shell-main { padding: var(--space-2); }
+  .global-search input { width: 140px; }
+  .code-editor { height: 280px; }
+}

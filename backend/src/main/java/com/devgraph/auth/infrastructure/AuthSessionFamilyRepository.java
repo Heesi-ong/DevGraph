@@ -11,4 +11,16 @@ public interface AuthSessionFamilyRepository extends JpaRepository<AuthSessionFa
 	Optional<AuthSessionFamilyJpaEntity> findByIdAndUserId(UUID id, UUID userId);
 
 	List<AuthSessionFamilyJpaEntity> findByUserIdAndRevokedAtIsNullOrderByLastRotatedAtDesc(UUID userId);
+
+	/**
+	 * 한 사용자의 살아 있는 세션(family)을 한꺼번에 폐기한다. `exceptFamilyId`가 null이면 전부.
+	 * 폐기된 family는 refresh와 재인증 토큰 소비에서 모두 거부된다(§17.2.1, §17.2.2).
+	 */
+	@org.springframework.data.jpa.repository.Modifying(clearAutomatically = true, flushAutomatically = true)
+	@org.springframework.data.jpa.repository.Query("""
+			update AuthSessionFamilyJpaEntity f set f.revokedAt = current_timestamp, f.revokeReason = :reason
+			where f.userId = :userId and f.revokedAt is null and (:except is null or f.id <> :except)""")
+	int revokeAll(@org.springframework.data.repository.query.Param("userId") UUID userId,
+			@org.springframework.data.repository.query.Param("reason") RevokeReason reason,
+			@org.springframework.data.repository.query.Param("except") UUID exceptFamilyId);
 }

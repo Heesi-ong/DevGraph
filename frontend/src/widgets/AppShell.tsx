@@ -27,6 +27,7 @@ export function AppShell() {
           <NavLink to="/projects">Projects</NavLink>
           <NavLink to="/resources">Resources</NavLink>
           <NavLink to="/graph">Graph</NavLink>
+          <NavLink to="/settings">설정</NavLink>
         </nav>
         <GlobalSearchBox />
         <span className="muted small">

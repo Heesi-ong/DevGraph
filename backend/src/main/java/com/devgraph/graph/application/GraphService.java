@@ -34,6 +34,8 @@ import com.devgraph.knowledge.domain.NodeType;
 import com.devgraph.relation.application.RelationQueryService;
 import com.devgraph.workspace.application.WorkspaceQueryService;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 /**
  * 설계서 §13.3 Graph 조회 정책. 중심 Graph는 낮은 depth부터 BFS로 확장하고, 상한에서 결정적으로 자르며,
  * 잘림을 응답에 숨기지 않는다. visited 집합으로 cycle에서도 종료하고, 여러 경로로 닿는 Node는 가장 낮은 depth로 한 번만 담는다.
@@ -56,9 +58,11 @@ public class GraphService {
 	private final GraphQueryRepository repository;
 	private final RelationQueryService relationQueryService;
 	private final WorkspaceQueryService workspaceQueryService;
+	private final MeterRegistry metrics;
 
 	public GraphService(GraphQueryRepository repository, RelationQueryService relationQueryService,
-			WorkspaceQueryService workspaceQueryService) {
+			WorkspaceQueryService workspaceQueryService, MeterRegistry metrics) {
+		this.metrics = metrics;
 		this.repository = repository;
 		this.relationQueryService = relationQueryService;
 		this.workspaceQueryService = workspaceQueryService;
@@ -121,9 +125,9 @@ public class GraphService {
 				reason = "MAX_EDGES";
 			}
 		}
-		return new GraphResponse(List.copyOf(included.values()), edges.stream().map(GraphService::edge).toList(),
+		return observed("focus", new GraphResponse(List.copyOf(included.values()), edges.stream().map(GraphService::edge).toList(),
 				truncated, reason, applied(depth, types, keys, includeArchived),
-				candidates.stream().limit(MAX_CANDIDATES).toList(), null, new Limits(maxNodes, maxEdges));
+				candidates.stream().limit(MAX_CANDIDATES).toList(), null, new Limits(maxNodes, maxEdges)));
 	}
 
 	/**
@@ -169,9 +173,18 @@ public class GraphService {
 		if (truncated) {
 			edges = edges.subList(0, HARD_MAX_EDGES);
 		}
-		return new GraphResponse(page.stream().map(n -> node(n, 0)).toList(), edges.stream().map(GraphService::edge).toList(),
+		return observed("workspace", new GraphResponse(page.stream().map(n -> node(n, 0)).toList(), edges.stream().map(GraphService::edge).toList(),
 				truncated, truncated ? "MAX_EDGES" : "NONE", applied(0, types, keys, includeArchived), List.of(),
-				nextCursor, new Limits(size, HARD_MAX_EDGES));
+				nextCursor, new Limits(size, HARD_MAX_EDGES)));
+	}
+
+	/** 설계서 §21 지표: 응답 Node 수 분포와 잘림 횟수. 어떤 Node/제목도 지표에 담지 않는다. */
+	private GraphResponse observed(String kind, GraphResponse response) {
+		metrics.summary("devgraph.graph.nodes", "kind", kind).record(response.nodes().size());
+		if (response.truncated()) {
+			metrics.counter("devgraph.graph.truncated", "kind", kind).increment();
+		}
+		return response;
 	}
 
 	// ---- helpers ---------------------------------------------------------------------------

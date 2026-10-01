@@ -14,6 +14,7 @@ import { ErrorDetailPage, ErrorFormPage } from '../pages/ErrorPages'
 import { SolutionDetailPage, SolutionFormPage } from '../pages/SolutionPages'
 import { ProjectDetailPage, ProjectFormPage, ProjectListPage } from '../pages/ProjectPages'
 import { ResourceDetailPage, ResourceFormPage, ResourceListPage } from '../pages/ResourcePages'
+import { SettingsPage } from '../pages/SettingsPage'
 import { AppShell } from '../widgets/AppShell'
 import { ProtectedRoute } from './ProtectedRoute'
 
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       // React Flow는 크다. Graph 화면에 들어갈 때만 내려받는다(§16.3).
       { path: 'graph', lazy: async () => ({ Component: (await import('../pages/GraphPage')).GraphPage }) },
       { path: 'search', element: <SearchPage /> },
+      { path: 'settings', element: <SettingsPage /> },
       { path: 'problems', element: <ProblemsPage /> },
       { path: 'errors/new', element: <ErrorFormPage /> },
       { path: 'errors/:id', element: <ErrorDetailPage /> },

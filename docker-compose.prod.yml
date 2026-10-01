@@ -1,0 +1,51 @@
+# 설계서 §21.1 초기 배포 구조(단일 호스트). Redis/worker/object storage는 없다.
+# 사용: cp .env.example .env && 값을 채운 뒤  docker compose -f docker-compose.prod.yml up -d --build
+# DB와 backend는 호스트 포트를 열지 않는다. 외부에 노출되는 것은 frontend(nginx) 하나뿐이다.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: devgraph
+      POSTGRES_USER: devgraph
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD를 .env에 설정하세요}
+    volumes:
+      - devgraph-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devgraph -d devgraph"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://postgres:5432/devgraph
+      DB_USERNAME: devgraph
+      DB_PASSWORD: ${DB_PASSWORD:?}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY를 .env에 설정하세요}
+      ALLOWED_ORIGINS: ${PUBLIC_BASE_URL:?}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?}
+      APP_VERSION: ${APP_VERSION:-dev}
+      EXPORT_TEMP_DIR: /var/devgraph/export
+    volumes:
+      - devgraph-export:/var/devgraph/export
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8080"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      - backend
+
+volumes:
+  devgraph-postgres-data:
+  devgraph-export:

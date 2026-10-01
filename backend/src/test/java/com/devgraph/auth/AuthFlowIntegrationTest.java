@@ -74,6 +74,34 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
 		assertThat(response.getBody()).contains("\"workspace\"");
 	}
 
+	@org.springframework.beans.factory.annotation.Autowired
+	org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+	@Test
+	void lostRefreshResponseIsForgivenWithinTheGraceWindowOnly() {
+		var signupResponse = signup(uniqueEmail(), "Grace Hopper", "correct-horse-battery");
+		String first = cookie(signupResponse, "refresh_token").orElseThrow();
+		String csrf = cookie(signupResponse, "csrf_token").orElseThrow();
+
+		var rotated = refresh(first, csrf); // 서버는 회전했지만 이 응답이 브라우저에 닿지 못했다고 가정
+		assertThat(rotated.getStatusCode()).isEqualTo(HttpStatus.OK);
+		var replay = refresh(first, csrf); // 브라우저는 옛 토큰으로 다시 요청한다
+		assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.OK);
+		String recovered = cookie(replay, "refresh_token").orElseThrow();
+		assertThat(refresh(recovered, csrf).getStatusCode()).isEqualTo(HttpStatus.OK); // 복구된 세션은 계속 쓸 수 있다
+
+		// 유예가 지난 뒤의 재사용은 여전히 탈취로 본다(family 폐기).
+		var other = signup(uniqueEmail(), "Late Replay", "correct-horse-battery");
+		String old = cookie(other, "refresh_token").orElseThrow();
+		String otherCsrf = cookie(other, "csrf_token").orElseThrow();
+		var step = refresh(old, otherCsrf);
+		jdbc.update("update auth_sessions set rotated_at = now() - interval '11 seconds' where refresh_token_hash = sha256(convert_to(?, 'UTF8'))", old);
+		var late = refresh(old, otherCsrf);
+		assertThat(late.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+		assertThat(late.getBody()).contains("TOKEN_REUSED");
+		assertThat(refresh(cookie(step, "refresh_token").orElseThrow(), otherCsrf).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+	}
+
 	@Test
 	void refreshRotatesTokenAndOldCookieIsRejectedAfterReuse() {
 		var signupResponse = signup(uniqueEmail(), "Katherine Johnson", "correct-horse-battery");

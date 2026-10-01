@@ -18,7 +18,7 @@ export function LoginPage() {
     try {
       await login(email, password)
       const meResponse = await me()
-      setAuthenticated(meResponse.user, meResponse.workspace)
+      setAuthenticated(meResponse.user, meResponse.workspace, meResponse.restriction)
       navigate('/', { replace: true })
     } catch {
       // §9.1 AUTH-02: 실패 메시지로 계정 존재 여부를 노출하지 않는다.

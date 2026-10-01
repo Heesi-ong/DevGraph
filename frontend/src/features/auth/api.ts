@@ -1,6 +1,6 @@
 import { apiClient, setAccessToken } from '../../shared/api/client'
 import { readCookie } from '../../shared/lib/cookies'
-import type { CurrentUser, CurrentWorkspace } from './authStore'
+import { useAuthStore, type CurrentUser, type CurrentWorkspace, type Restriction } from './authStore'
 
 interface AuthResponse {
   user: CurrentUser
@@ -10,6 +10,7 @@ interface AuthResponse {
 interface MeResponse {
   user: CurrentUser
   workspace: CurrentWorkspace | null
+  restriction: Restriction
 }
 
 function csrfHeaders() {
@@ -45,4 +46,11 @@ export async function logout() {
 export async function me() {
   const { data } = await apiClient.get<MeResponse>('/auth/me')
   return data
+}
+
+// 제한 세션(§17.2.3)을 푸는 작업(비밀번호 변경, 탈퇴 취소) 뒤에는 제한 claim이 없는 새 access token으로 상태를 다시 읽는다.
+export async function reloadSession() {
+  await refresh()
+  const response = await me()
+  useAuthStore.getState().setAuthenticated(response.user, response.workspace, response.restriction)
 }

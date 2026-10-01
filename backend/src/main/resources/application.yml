@@ -26,6 +26,10 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        # liveness는 프로세스만, readiness는 DB와 migration까지 본다. 프로브 상세는 외부에 노출하지 않는다.
+        readiness:
+          include: readinessState,db,migration
 
 devgraph:
   auth:
@@ -38,6 +42,8 @@ devgraph:
   cookie:
     secure: ${COOKIE_SECURE:true}
   public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+  # Export manifest의 generatedByAppVersion(§9.8). 배포 파이프라인이 이미지 태그와 같은 값을 넣는다.
+  app-version: ${APP_VERSION:dev}
   export:
     temp-dir: ${EXPORT_TEMP_DIR:/tmp/devgraph-export}
     max-size-mb: ${MAX_EXPORT_SIZE_MB:250}

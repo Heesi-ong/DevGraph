@@ -70,6 +70,14 @@ public class AuthSessionJpaEntity {
 		return expiresAt;
 	}
 
+	public String getIpPrefix() {
+		return ipPrefix;
+	}
+
+	public Instant getCreatedAt() {
+		return createdAt;
+	}
+
 	public Instant getRotatedAt() {
 		return rotatedAt;
 	}

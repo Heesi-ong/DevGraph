@@ -21,8 +21,13 @@ public final class ApiErrorWriter {
 		response.setStatus(status.value());
 		response.setContentType("application/json;charset=UTF-8");
 		response.getWriter().write("{\"code\":\"" + escape(code) + "\",\"message\":\"" + escape(message)
-				+ "\",\"fieldErrors\":[],\"traceId\":\"" + UUID.randomUUID() + "\",\"timestamp\":\""
+				+ "\",\"fieldErrors\":[],\"traceId\":\"" + traceId() + "\",\"timestamp\":\""
 				+ Instant.now() + "\"}");
+	}
+
+	private static String traceId() {
+		String current = org.slf4j.MDC.get("traceId");
+		return current != null ? current : UUID.randomUUID().toString();
 	}
 
 	private static String escape(String value) {

@@ -18,6 +18,12 @@ repositories {
 	mavenCentral()
 }
 
+// NFR-03 dependency critical 0: Trivy가 Spring Boot 4.1.1 BOM이 관리하는 아래 버전에서 CRITICAL/HIGH를 보고했다.
+// Boot가 패치 버전을 담은 릴리스로 올라가면 이 override는 지운다(docs/NFR_REPORT.md).
+ext['tomcat.version'] = '11.0.26'
+ext['jackson-bom.version'] = '3.1.7'
+ext['jackson-2-bom.version'] = '2.21.7'
+
 dependencies {
 	// Redis, WebSocket, S3는 설계서 §0/§18.2/§25에서 명시적으로 제외한 항목이라 의존성에 넣지 않는다.
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
@@ -29,7 +35,7 @@ dependencies {
 	implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5'
 	implementation 'org.flywaydb:flyway-database-postgresql'
 	// Argon2PasswordEncoder(§17.2)가 런타임에 BouncyCastle을 요구한다. 컴파일 타임에는 드러나지 않는다.
-	implementation 'org.bouncycastle:bcprov-jdk18on:1.80'
+	implementation 'org.bouncycastle:bcprov-jdk18on:1.86'
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
 	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.6'

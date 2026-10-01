@@ -10,7 +10,7 @@ export function useAuthBootstrap() {
 
   useEffect(() => {
     me()
-      .then((response) => setAuthenticated(response.user, response.workspace))
+      .then((response) => setAuthenticated(response.user, response.workspace, response.restriction))
       .catch(() => setAnonymous())
   }, [setAuthenticated, setAnonymous])
 }

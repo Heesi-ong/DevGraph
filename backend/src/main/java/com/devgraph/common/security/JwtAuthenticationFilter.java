@@ -30,6 +30,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 				AuthenticatedUser user = tokenProvider.parse(header.substring("Bearer ".length()));
 				var authentication = new UsernamePasswordAuthenticationToken(user, null, List.of());
 				SecurityContextHolder.getContext().setAuthentication(authentication);
+				// 요청 로그(RequestLoggingFilter)가 사용자 식별자를 원문 대신 해시 앞부분으로 남기게 한다.
+				org.slf4j.MDC.put("userIdHash", java.util.HexFormat.of().formatHex(TokenHasher.sha256(user.userId().toString()), 0, 6));
 			} catch (JwtTokenProvider.InvalidTokenException ignored) {
 				// 인증 없이 통과시킨다 — 보호된 엔드포인트는 SecurityConfig의 authenticated() 규칙이 401로 막는다.
 			}
