@@ -10,6 +10,7 @@ export async function search(filters: SearchFilters, cursor?: string) {
       language: filters.language,
       framework: filters.framework,
       archived: filters.archived || undefined,
+      scope: filters.history ? 'snippetHistory' : undefined,
       cursor,
       size: 20,
     },

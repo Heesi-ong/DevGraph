@@ -241,6 +241,29 @@ public class SnippetService {
 				.orElseThrow(SnippetService::notFound);
 	}
 
+	public record DiffView(int from, int to, int added, int deleted, List<com.devgraph.snippet.domain.LineDiff.Hunk> hunks) {
+	}
+
+	/** SNP-07: 두 버전의 줄 단위 diff. 너무 큰 변경은 계산하지 않고 413으로 거절한다. */
+	@Transactional(readOnly = true)
+	public DiffView diff(UUID userId, UUID nodeId, int from, int to) {
+		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
+		requireSnippet(workspaceId, nodeId);
+		if (from < 1 || to < 1) {
+			throw validation("from", "INVALID_VERSION");
+		}
+		String oldCode = versionRepository.findBySnippetNodeIdAndWorkspaceIdAndVersionNo(nodeId, workspaceId, from)
+				.orElseThrow(SnippetService::notFound).getCode();
+		String newCode = versionRepository.findBySnippetNodeIdAndWorkspaceIdAndVersionNo(nodeId, workspaceId, to)
+				.orElseThrow(SnippetService::notFound).getCode();
+		try {
+			var result = com.devgraph.snippet.domain.LineDiff.diff(oldCode, newCode);
+			return new DiffView(from, to, result.added(), result.deleted(), result.hunks());
+		} catch (com.devgraph.snippet.domain.LineDiff.TooLargeException e) {
+			throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "DIFF_TOO_LARGE", "변경이 너무 커서 비교할 수 없습니다. 각 버전 원문을 열어 확인해 주세요.");
+		}
+	}
+
 	/** SNP-08: 복사 통계. 실패해도 복사 자체를 막지 않는다는 계약은 클라이언트가 지킨다(§14.4). */
 	@Transactional
 	public void recordUse(UUID userId, UUID nodeId, String action) {

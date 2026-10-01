@@ -174,3 +174,35 @@ test('search results show dangerous code as plain text and never execute it', as
   expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined()
   expect(dialogs).toEqual([])
 })
+
+test('Phase 8: Korean body substring and past snippet versions are searchable', async ({ page }) => {
+  const s = await apiSignup(page)
+  await api(page, s, '/nodes', { type: 'NOTE', title: '운영 메모', bodyMd: '배포 전에 트랜잭션을 점검했다' })
+  const created = await snippet(page, s, 'Legacy helper', 'String legacyMarkerCall() { return "a"; }')
+  const patched = await page.request.patch(`/api/v1/snippets/${created.id}`, {
+    headers: { Authorization: `Bearer ${s.token}` },
+    data: { version: 0, code: 'String freshHelper() { return "b"; }' },
+  })
+  expect(patched.ok()).toBe(true)
+
+  // 조사가 붙은 본문("트랜잭션을")이 "트랜잭션"으로 찾아지고 일치 부분이 하이라이트된다.
+  await page.goto('/search?q=' + encodeURIComponent('트랜잭션'))
+  const results = page.getByRole('list', { name: '검색 결과' })
+  const note = results.getByRole('listitem').filter({ hasText: '운영 메모' })
+  await expect(note.getByText('일치: 본문')).toBeVisible()
+  await expect(note.locator('mark')).toHaveText('트랜잭션')
+
+  // 현재 버전에 없는 코드는 기본 검색에서 안 나오고, 과거 버전 범위를 켜면 버전 번호와 함께 나온다.
+  await page.goto('/search?q=legacyMarkerCall')
+  await expect(page.getByRole('region', { name: '결과 없음' })).toBeVisible()
+  await page.getByLabel('Snippet 과거 버전 코드 검색').click() // 상태가 URL에서 오므로 check() 대신 click()
+  await expect(page).toHaveURL(/scope=snippetHistory/)
+  const history = page.getByRole('list', { name: '검색 결과' })
+  const item = history.getByRole('listitem').filter({ hasText: 'Legacy helper' })
+  await expect(item.getByText('v1(과거 버전)에서 일치')).toBeVisible()
+  await expect(item.locator('pre mark')).toHaveText('legacyMarkerCall')
+  // 새로고침해도 URL 상태가 유지된다.
+  await page.reload()
+  await expect(page.getByLabel('Snippet 과거 버전 코드 검색')).toBeChecked()
+  await expect(history.getByRole('listitem').filter({ hasText: 'Legacy helper' })).toBeVisible()
+})

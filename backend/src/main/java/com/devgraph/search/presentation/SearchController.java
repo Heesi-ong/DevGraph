@@ -30,7 +30,13 @@ public class SearchController {
 			@RequestParam(required = false) List<NodeType> types, @RequestParam(required = false) UUID tagId,
 			@RequestParam(required = false) String language, @RequestParam(required = false) String framework,
 			@RequestParam(defaultValue = "false") boolean archived, @RequestParam(required = false) String cursor,
-			@RequestParam(required = false) Integer size) {
+			@RequestParam(required = false) Integer size, @RequestParam(required = false) String scope) {
+		if (scope != null && !scope.isBlank()) {
+			if (!"snippetHistory".equals(scope)) {
+				throw com.devgraph.common.web.FieldRules.validation("scope", "UNSUPPORTED_SCOPE");
+			}
+			return service.searchHistory(user.userId(), q, tagId, language, framework, archived, cursor, size);
+		}
 		return service.search(user.userId(), q, types, tagId, language, framework, archived, cursor, size);
 	}
 }

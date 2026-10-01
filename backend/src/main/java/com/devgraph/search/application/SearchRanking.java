@@ -18,6 +18,8 @@ public final class SearchRanking {
 	public static final double LANGUAGE_FRAMEWORK = 45;
 	public static final double CODE = 40; // × similarity(부분 문자열 일치는 1.0)
 	public static final double BODY_FTS = 25; // × normalized_rank
+	// 본문의 부분 문자열 일치(조사가 붙은 한국어 등). FTS 일치(최대 25)보다 낮게 둬서 정확한 토큰 일치가 위에 오게 한다.
+	public static final double BODY_CONTAINS = 10;
 	// Error 메시지의 부분 일치(예외 이름 일부로도 찾는다). 코드 일치와 같은 비중이다.
 	public static final double ERROR_MESSAGE = 40;
 	public static final double FAVORITE = 5;

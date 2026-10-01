@@ -1,6 +1,6 @@
 # DevGraph 제품·서비스·기술 설계서
 
-> 문서 상태: 기준안 v2.0 (Phase 0~7 구현 결과 반영)  
+> 문서 상태: 기준안 v2.1 (Phase 0~7 구현 결과 + Phase 8 1차 범위 반영)  
 > 작성일: 2026-09-28  
 > 대상: Product, UX, Frontend, Backend, QA, 운영 담당 및 구현 에이전트  
 > 문서 목적: 별도 구두 설명 없이 MVP와 1.0 구현을 시작할 수 있는 Source of Truth
@@ -16,6 +16,8 @@
 > **v1.9 변경 요약:** Phase 6(Project / Error / Solution, 그리고 Resource) 구현 결과를 반영했다. 서브타입 4종의 API 계약·검증·상태 전이(Error 해결 상태 머신, 미해결 경고)·체인 원자성(Solution 생성과 `SOLVED_BY`를 한 트랜잭션)·Resource URL 정규화와 중복 경고·Project 그래프를 §14.6에, 검색 범위 확장(Error 메시지·Solution 본문·Project 설명)과 가중치를 §9.5·§15.4에, 구현 결과와 이월 항목을 §19에 기록했다.
 >
 > **v2.0 변경 요약:** Phase 7(서비스 안정화) 구현 결과를 반영했다. 재인증·비밀번호 변경·계정 탈퇴/취소·영구 삭제·Export·rate limit·보안 헤더의 실제 계약과 수치를 §14.2·§14.6·§17에, 운영 구성(prod compose, 구조화 로그, health 그룹, 백업/복원 스크립트)을 §21에, 구현 결과·측정 결과·이월 항목을 §19에 기록했다. 부하 측정이 찾아낸 검색 결함(순위 함수를 FTS 비해당 행에도 계산해 p95 3.66s)과 복원 리허설·보안 점검 결과는 `docs/NFR_REPORT.md`, `docs/SECURITY_CHECKLIST.md`, `docs/RUNBOOK.md`에 있다. **§17.2의 refresh 응답 유실은 10초 유예 방식으로 확정·구현**했다. 제한 세션이 `POST /auth/refresh`로 제한을 풀 수 있어야 한다는 §17.2.3의 암묵적 전제를 화이트리스트에 명시했다(구현 중 발견한 결함).
+>
+> **v2.1 변경 요약:** Phase 8(고도화) 1차 범위를 반영했다. 운영 기반(management 포트 분리와 사용량 지표, gitleaks 이력 스캔, 백업 gpg 암호화·업로드 훅)은 §21에, 이월 항목 세 가지는 계약을 §14.4(Snippet diff)·§14.6(`scope=snippetHistory`, 본문 부분 일치)에, 계획·성공/중단 기준과 결과는 `docs/PHASE8_PLAN.md`·§19에 기록했다. 본문 부분 일치는 부하 측정에서 질의당 지연이 늘어 두 번 고쳤다(행마다 계산 → 인덱스 서브쿼리, 2자 질의 제외).
 >
 > **v1.8 변경 요약:** Phase 5(Search) 구현 결과를 반영했다. `GET /search`의 실제 계약(검증, 필터, cursor, 구조화 highlight, 0건 fallback)을 §14.6에, 랭킹 가중치 조정(**정확 제목 일치 100 → 300**, 제목 부분 일치 +35 추가)과 한국어 본문 검색의 한계, 본문 색인 범위(앞 100,000자)를 §9.5·§15.4에, 구현 결과와 이월 항목을 §19에 기록했다.
 >
@@ -1080,7 +1082,8 @@ Clipboard 자체는 Frontend에서 수행한다. usage API 실패가 복사를 �
 - **Secret 확인 흐름(SNP-09, §17.5):** 코드가 새로 저장될 때(생성, 코드 변경 시) 서버가 스캔한다(private key, API key 접두어, JWT, 자격 증명 대입(`password=`, `DB_PASSWORD=`, `API_TOKEN=` 등), 계정이 든 접속 문자열). 의심되면 `422 SECRET_CONFIRMATION_REQUIRED`와 `fieldErrors:[{field:"code", reason:"<KIND>@L<줄>"}]`을 반환하고 **아무것도 저장하지 않는다**. 응답·로그에는 종류와 줄 번호만 있고 의심 값은 없다. 재요청에 `secretConfirmation: "CONFIRMED"`를 담으면 저장되고(`secretScanStatus=CONFIRMED_WITH_FINDINGS`), private key는 `"CONFIRMED_HIGH_RISK"`(재확인)여야 통과한다. 코드를 고쳐 secret이 없어지면 `CLEAN`으로 돌아간다. 고엔트로피 문자열 감지는 해시·UUID 오탐이 커서 제외했다. 스캔은 한 줄을 1,024자 창(겹침 256)으로 나눠 수행해, 512 KB 한 줄 입력에서도 정규식 백트래킹이 폭발하지 않는다.
 - 버전 목록은 최신순 cursor 페이지이며 코드 원문 대신 `codeLength`(문자 수)를 준다. 원문은 `GET /snippets/{id}/versions/{no}`.
 - `POST /snippets/{id}/usage`는 `{action:"COPY"}`만 허용(그 외 `400`)하고 `use_count`를 DB에서 원자적으로 증가시킨다. Node `version`은 올리지 않으므로 동시 편집 충돌 원인이 되지 않는다. 이전 버전 원문 복사는 통계에 포함하지 않는다. rate limit은 Phase 7.
-- **제외/이월:** `GET /snippets/{id}/diff`(SNP-07, SHOULD — "초기에는 버전별 원문 조회만" 허용), 요청의 `relations[]`(Phase 4). 알 수 없는 요청 필드는 무시된다.
+- **Diff(SNP-07, v2.1 구현):** `GET /snippets/{id}/diff?from=&to=` → `{from, to, added, deleted, hunks:[{oldStart, oldLines, newStart, newLines, lines:[{type: CONTEXT|ADD|DELETE, oldNo, newNo, text, noEol}]}]}`. 줄 단위 Myers 최소 편집 diff이고 hunk마다 앞뒤 3줄 컨텍스트, 변경 사이가 6줄 이하면 한 hunk로 묶는다. 줄은 `\n`로 나누며 `\r`는 내용에 남아 **CRLF만 다른 두 버전도 차이로 보이고**, 마지막 줄의 줄바꿈 유무(`noEol`)도 차이로 본다. 편집 거리 2,000 또는 한쪽 40,000줄을 넘으면 계산하지 않고 `413 DIFF_TOO_LARGE`(느린 요청이 서버를 잡지 않게). 없는 버전은 404, 번호가 1 미만이면 400, 같은 버전끼리는 빈 `hunks`. 화면은 줄 번호와 `+`/`-` 기호를 텍스트로 보여 줘 색에만 의존하지 않는다. 무작위 입력 300건으로 최소성(LCS 편집 거리와 일치)과 줄 번호 정합성을 검증했다.
+- **제외/이월:** 요청의 `relations[]`(Phase 4). 알 수 없는 요청 필드는 무시된다.
 
 ### 14.5 Relation/Graph API
 
@@ -1175,7 +1178,9 @@ Export는 §9.8/§12.3에서 확정한 대로 항상 `export_jobs`를 거치는 
 - **0건 fallback(첫 페이지만):** `fallback={unfilteredCount, similar[], recent[]}` — 필터가 있었다면 필터를 풀었을 때의 건수(`unfilteredCount`, 필터가 없으면 `null`), 제목 trigram 유사도 ≥ 0.1인 "유사 결과", 유사 결과도 없으면 최근 수정 항목 5개. 결과가 있으면 `fallback`은 `null`이다.
 - **지표:** `devgraph.search.duration`(태그 `result=hit|zero`)과 `devgraph.search.zero_results`. **검색어는 지표·로그에 남기지 않는다**(길이와 건수만, 개인 지식이므로).
 - **보안:** 모든 값은 바인드 파라미터이며 `%` `_`는 문자 그대로 검색된다(`LikeEscape`). SQL 조각은 서버 상수뿐이다. `'; drop table …`, `& | ! (`, `foo:*` 같은 입력이 오류 없이 처리됨을 테스트로 확인했다.
-- **제외/이월:** `scope=snippetHistory`(과거 버전 검색), 사용자 검색 rate limit(Phase 7), Relation Picker의 후보 검색은 "허용 타입·미연결" 조건이 있어 통합 검색으로 교체하지 않고 전용 endpoint를 유지한다.
+- **과거 버전 검색(v2.1 구현, SRCH-02):** `GET /search?scope=snippetHistory&q=…`는 Snippet의 **과거 버전**(현재 버전 제외) 코드만 부분 일치로 찾는다. Snippet마다 일치한 가장 최근의 과거 버전 하나만 나오고 각 항목에 `versionNo`가 붙으며(기본 검색은 `null`), 정렬은 `(updatedAt DESC, id ASC)`(점수 없음), cursor는 그 두 값이다. 언어·framework·태그·보관 필터는 적용되고 `types`는 무시된다. 알 수 없는 `scope`는 `400`. 기본 검색에는 과거 버전이 섞이지 않는다.
+- **본문 부분 일치(v2.1 구현):** 본문 앞 100,000자의 소문자 부분 문자열 일치(`ix_knowledge_nodes__body_trgm`, V12)를 후보와 랭킹(+10, FTS 일치 최대 25보다 낮음)에 추가해 "트랜잭션을" 같은 조사가 붙은 한국어 본문도 "트랜잭션"으로 찾는다. **3자 이상 질의에만 적용**한다 — 2자 질의는 trigram 인덱스를 못 타서 모든 본문을 훑게 되어 질의당 720ms가 걸리는 것을 실측했으므로 제외한다(2자 질의도 제목 부분 일치와 본문 토큰 일치는 그대로). Node 본문(`body_md`)만 대상이며 Solution/Error 서술 필드의 부분 일치는 하지 않는다.
+- **제외/이월:** 사용자 검색 rate limit(Phase 7 구현됨), Relation Picker의 후보 검색은 "허용 타입·미연결" 조건이 있어 통합 검색으로 교체하지 않고 전용 endpoint를 유지한다.
 
 ### 14.7 공통 스키마 참고
 
@@ -1755,6 +1760,15 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - 백업 암호화·오프사이트 전송, 복원 시 탈퇴 tombstone 재적용, 저장소 시크릿 이력 스캔, 동적 스캔(ZAP)·침투 테스트, 스크린 리더 수동 점검, Lighthouse(실제 네트워크 조건 LCP), soak/쓰기 부하/50 VU/대용량 Export 측정, 점진 지연(§17.6), 지표 수집 파이프라인(Prometheus)은 하지 않았다. 기반 이미지 내 `pebble`(Go 바이너리) HIGH 14건이 남아 있다(우리가 실행하지 않음).
 - 단일 인스턴스 전제: rate limit 카운터는 메모리에 있다. 이미 발급된 Access Token은 최대 15분 동안 유효하다(stateless).
 - CI는 이번 단계에서 바꾸지 않았다(백엔드 `./gradlew build`, 프론트 lint/test/build). 이미지 취약점 스캔과 prod 스택 E2E는 수동 실행이다.
+
+#### Phase 8 1차 범위 결과 (v2.1)
+
+계획·지표·성공/중단 기준은 `docs/PHASE8_PLAN.md`. 1차 범위는 운영 기반과 이월 항목이다.
+
+- **운영 기반:** management 포트(`MANAGEMENT_PORT`, compose 8081) 분리 — `metrics`/`prometheus`는 이 포트에서만 응답하고 호스트·nginx에는 공개하지 않으며 main 포트에서는 설정 실수로 노출돼도 보안 규칙이 막는다(`isManagementPortActuatorRequest`는 두 포트가 같으면 항상 false — 처음 구현에서 모든 요청을 허용하던 결함을 테스트가 잡았다). 사용량 지표는 횟수만(`devgraph_activity_total{action}`, `devgraph_snippet_copy_total`). gitleaks 전체 이력 스캔: 7건 전부 시크릿 감지기의 가짜 fixture라 경로로만 제외하고 CI `secrets` 잡이 매번 재스캔한다. 백업 gpg AES256 암호화(평문 덤프 미생성)와 업로드 훅(암호화 필수), 암호화 덤프로 복원 리허설 통과.
+- **Snippet diff**(§14.4), **과거 버전 검색**과 **한국어 본문 부분 일치**(§14.6): 구현·통합 테스트·E2E 통과.
+- **측정(28k Node, 20 VU, warm):** 본문 부분 일치 도입 직후 처음에는 검색 p95가 659ms(cold 806ms로 목표 초과), 1차 수정(행마다 계산 → 인덱스 서브쿼리)은 오히려 tail이 악화(p95 1.07s)되어 원인을 찾아 2자 질의를 제외한 최종안에서 **warm 검색 p95 364ms, cold 547ms**(목표 800ms 이내, 목록·상세 p95 약 108ms). 같은 날 기준선(465ms)보다 낮게 나왔지만 이유는 확인하지 못했고(처리량도 함께 변함) 호스트 부하가 같지 않았을 수 있으므로 "회귀 없음"으로만 해석한다.
+- **이월:** 본문 부분 일치는 Node 본문만 대상, 2자 질의 제외, 쓰기 시 GIN 재색인 비용은 쓰기 부하 측정에서 따로 확인하지 않았다. Snippet diff는 split(좌우) 뷰 없이 unified 표시만, 과거 버전 검색은 가장 최근 일치 버전 하나만 보여 준다. Import와 AI·추천 기능은 2차 범위다.
 
 ### Phase 8 — 고도화
 

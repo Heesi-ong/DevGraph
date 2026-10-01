@@ -77,6 +77,22 @@ test('Snippet lifecycle: v1, copy exactly, v2 on code change, no version on meta
   await v1.getByRole('button', { name: 'v1 복사' }).click()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(CODE_V1)
 
+  // 버전 비교: 기본값이 이전(v1)→최신(v2)이고 변경된 줄이 +/- 기호와 줄 번호로 보인다.
+  const compare = page.getByRole('region', { name: '버전 비교' })
+  await compare.getByRole('button', { name: '비교' }).click()
+  await expect(compare.getByRole('status')).toContainText('+1줄 추가')
+  await expect(compare.getByRole('status')).toContainText('-1줄 삭제')
+  const changed = compare.locator('tr.diff-delete, tr.diff-add')
+  await expect(changed).toHaveCount(2)
+  await expect(compare.locator('tr.diff-delete')).toContainText('hello ${name}')
+  await expect(compare.locator('tr.diff-delete td[aria-label="삭제"]')).toHaveText('-')
+  await expect(compare.locator('tr.diff-add')).toContainText('hi, ${name}!')
+  await expect(compare.locator('tr.diff-add td[aria-label="추가"]')).toHaveText('+')
+  // 같은 버전끼리는 변경 없음
+  await compare.getByLabel('이전 버전').selectOption('v2')
+  await compare.getByRole('button', { name: '비교' }).click()
+  await expect(compare.getByText('두 버전의 코드가 같습니다.')).toBeVisible()
+
   // 이전 버전 복사는 사용 통계에 들어가지 않는다. 새로고침 후에도 v2 / 1회.
   await page.reload()
   await expect(page.getByText(/^v2 · 복사 1회/)).toBeVisible()

@@ -23,6 +23,7 @@ function readFilters(params: URLSearchParams): SearchFilters {
     language: params.get('language') || undefined,
     framework: params.get('framework') || undefined,
     archived: params.get('archived') === 'true',
+    history: params.get('scope') === 'snippetHistory',
   }
 }
 
@@ -73,7 +74,7 @@ export function SearchPage() {
 
   const items = results.data?.pages.flatMap((p) => p.items) ?? []
   const fallback = results.data?.pages[0]?.fallback ?? null
-  const hasFilters = filters.types.length > 0 || !!filters.language || !!filters.framework || filters.archived
+  const hasFilters = filters.types.length > 0 || !!filters.language || !!filters.framework || filters.archived || filters.history
 
   return (
     <div ref={container} onKeyDown={onKeyDown}>
@@ -139,8 +140,16 @@ export function SearchPage() {
             />{' '}
             보관된 항목 포함
           </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={filters.history}
+              onChange={(e) => update({ scope: e.target.checked ? 'snippetHistory' : null })}
+            />{' '}
+            Snippet 과거 버전 코드 검색
+          </label>
           {hasFilters && (
-            <button type="button" onClick={() => update({ types: null, language: null, framework: null, archived: null })}>
+            <button type="button" onClick={() => update({ types: null, language: null, framework: null, archived: null, scope: null })}>
               필터 해제
             </button>
           )}
@@ -239,6 +248,7 @@ function ResultItem({ hit }: { hit: SearchHit }) {
         </pre>
       )}
       <p className="muted small">
+        {hit.versionNo != null && <strong>v{hit.versionNo}(과거 버전)에서 일치 · </strong>}
         일치: {hit.matchedFields.map((f) => FIELD_LABEL[f]).join(', ') || '유사'} · {new Date(hit.updatedAt).toLocaleDateString('ko-KR')}
       </p>
     </li>

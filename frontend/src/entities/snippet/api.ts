@@ -5,6 +5,7 @@ import type {
   SnippetDetail,
   SnippetFilters,
   SnippetSummary,
+  SnippetDiff,
   VersionContent,
   VersionSummary,
 } from './types'
@@ -57,4 +58,9 @@ export async function getVersion(id: string, versionNo: number) {
 // 복사 통계(SNP-08). 실패해도 복사 자체를 실패시키면 안 되므로 호출하는 쪽이 결과를 무시한다(§14.4).
 export async function recordCopy(id: string) {
   await apiClient.post(`/snippets/${id}/usage`, { action: 'COPY' })
+}
+
+export async function getDiff(id: string, from: number, to: number) {
+  const { data } = await apiClient.get<SnippetDiff>(`/snippets/${id}/diff`, { params: { from, to } })
+  return data
 }

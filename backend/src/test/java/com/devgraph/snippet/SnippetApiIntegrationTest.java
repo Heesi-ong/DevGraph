@@ -97,6 +97,42 @@ class SnippetApiIntegrationTest extends AbstractIntegrationTest {
 	// ---- validation: size / encoding --------------------------------------------------------
 
 	@Test
+	void diffShowsLineChangesBetweenVersionsAndRespectsLimitsAndIsolation() {
+		String token = signupToken();
+		String id = createSnippet(token, "Diff", "java", "class A {\n  int x = 1;\n  int y = 2;\n}\n");
+		patch(token, id, 0, Map.of("code", "class A {\n  int x = 10;\n  int y = 2;\n  int z = 3;\n}\n"));
+
+		var diff = call(HttpMethod.GET, "/api/v1/snippets/" + id + "/diff?from=1&to=2", token, null);
+		assertThat(diff.getStatusCode()).as(diff.getBody()).isEqualTo(HttpStatus.OK);
+		assertThat((Integer) JsonPath.read(diff.getBody(), "$.added")).isEqualTo(2);
+		assertThat((Integer) JsonPath.read(diff.getBody(), "$.deleted")).isEqualTo(1);
+		assertThat(JsonPath.<List<String>>read(diff.getBody(), "$.hunks[0].lines[?(@.type=='DELETE')].text")).containsExactly("  int x = 1;");
+		assertThat(JsonPath.<List<String>>read(diff.getBody(), "$.hunks[0].lines[?(@.type=='ADD')].text"))
+				.containsExactly("  int x = 10;", "  int z = 3;");
+		// 반대 방향은 추가/삭제가 뒤바뀐다. 같은 버전끼리는 변경이 없다.
+		var reverse = call(HttpMethod.GET, "/api/v1/snippets/" + id + "/diff?from=2&to=1", token, null);
+		assertThat((Integer) JsonPath.read(reverse.getBody(), "$.deleted")).isEqualTo(2);
+		assertThat(JsonPath.<List<?>>read(call(HttpMethod.GET, "/api/v1/snippets/" + id + "/diff?from=2&to=2", token, null).getBody(), "$.hunks")).isEmpty();
+		// 없는 버전 404, 잘못된 번호 400, 다른 Workspace 404.
+		assertThat(call(HttpMethod.GET, "/api/v1/snippets/" + id + "/diff?from=1&to=9", token, null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+		assertThat(call(HttpMethod.GET, "/api/v1/snippets/" + id + "/diff?from=0&to=1", token, null).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+		assertThat(call(HttpMethod.GET, "/api/v1/snippets/" + id + "/diff?from=1&to=2", signupToken(), null).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+
+		// 편집 거리가 상한을 넘으면 계산하지 않고 413.
+		StringBuilder a = new StringBuilder();
+		StringBuilder b = new StringBuilder();
+		for (int i = 0; i < 2500; i++) {
+			a.append("old").append(i).append('\n');
+			b.append("new").append(i).append('\n');
+		}
+		String big = createSnippet(token, "Big", "java", a.toString());
+		patch(token, big, 0, Map.of("code", b.toString()));
+		var tooLarge = call(HttpMethod.GET, "/api/v1/snippets/" + big + "/diff?from=1&to=2", token, null);
+		assertThat(tooLarge.getStatusCode().value()).isEqualTo(413);
+		assertThat(tooLarge.getBody()).contains("DIFF_TOO_LARGE");
+	}
+
+	@Test
 	void rejectsInvalidCodeAndMetadata() {
 		String token = signupToken();
 		assertThat(call(HttpMethod.POST, "/api/v1/snippets", token, snippet("t", "java", "   ")).getStatusCode())

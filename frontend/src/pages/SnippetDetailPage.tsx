@@ -1,14 +1,92 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { getSnippet, getVersion, listVersions } from '../entities/snippet/api'
+import { getDiff, getSnippet, getVersion, listVersions } from '../entities/snippet/api'
 import { snippetKeys } from '../entities/snippet/queryKeys'
 import { CopyCodeButton } from '../features/copy-snippet/CopyCodeButton'
 import { RelatedNodes } from '../features/relations/RelatedNodes'
 import { StatusActions } from '../features/node-status/StatusActions'
 import { FavoriteButton } from '../features/toggle-favorite/FavoriteButton'
+import { toApiError } from '../shared/api/errors'
 import { ErrorState, LoadingState } from '../shared/ui/StateViews'
 import { CodeBlock } from '../widgets/CodeBlock'
+
+// 설계서 §14.4/SNP-07. 색에만 기대지 않도록 줄마다 +/- 기호와 줄 번호를 텍스트로 보여 준다.
+function VersionDiff({ snippetId, versionNos }: { snippetId: string; versionNos: number[] }) {
+  const newest = versionNos[0]
+  const [from, setFrom] = useState<number>(versionNos[1] ?? newest)
+  const [to, setTo] = useState<number>(newest)
+  const [requested, setRequested] = useState<{ from: number; to: number } | null>(null)
+  const diff = useQuery({
+    queryKey: snippetKeys.diff(snippetId, requested?.from ?? 0, requested?.to ?? 0),
+    queryFn: () => getDiff(snippetId, requested!.from, requested!.to),
+    enabled: requested !== null,
+    retry: false,
+  })
+  if (versionNos.length < 2) return null
+  const tooLarge = diff.error && toApiError(diff.error).code === 'DIFF_TOO_LARGE'
+
+  return (
+    <section aria-label="버전 비교">
+      <h3>버전 비교</h3>
+      <div className="row">
+        <label>
+          이전 버전
+          <select value={from} onChange={(e) => setFrom(Number(e.target.value))}>
+            {versionNos.map((n) => (
+              <option key={n} value={n}>v{n}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          이후 버전
+          <select value={to} onChange={(e) => setTo(Number(e.target.value))}>
+            {versionNos.map((n) => (
+              <option key={n} value={n}>v{n}</option>
+            ))}
+          </select>
+        </label>
+        <button type="button" onClick={() => setRequested({ from, to })}>
+          비교
+        </button>
+      </div>
+      {diff.isLoading && <LoadingState />}
+      {tooLarge && <p role="alert" className="error-text">변경이 너무 커서 비교할 수 없습니다. 각 버전의 원문을 열어 확인해 주세요.</p>}
+      {diff.error && !tooLarge && <ErrorState error={diff.error} onRetry={() => diff.refetch()} />}
+      {diff.data && (
+        <div aria-label={`v${diff.data.from}에서 v${diff.data.to}로 변경`}>
+          <p role="status">
+            v{diff.data.from} → v{diff.data.to}: <strong>+{diff.data.added}</strong>줄 추가, <strong>-{diff.data.deleted}</strong>줄 삭제
+          </p>
+          {diff.data.hunks.length === 0 && <p className="muted">두 버전의 코드가 같습니다.</p>}
+          {diff.data.hunks.map((h) => (
+            <table key={`${h.oldStart}-${h.newStart}`} className="diff-table" aria-label={`변경 구간 이전 ${h.oldStart}행부터`}>
+              <caption className="muted small mono">
+                @@ -{h.oldStart},{h.oldLines} +{h.newStart},{h.newLines} @@
+              </caption>
+              <tbody>
+                {h.lines.map((l, i) => (
+                  <tr key={i} className={`diff-${l.type.toLowerCase()}`}>
+                    <td className="diff-no" aria-label="이전 줄 번호">{l.oldNo || ''}</td>
+                    <td className="diff-no" aria-label="이후 줄 번호">{l.newNo || ''}</td>
+                    <td className="diff-mark" aria-label={l.type === 'ADD' ? '추가' : l.type === 'DELETE' ? '삭제' : '유지'}>
+                      {l.type === 'ADD' ? '+' : l.type === 'DELETE' ? '-' : ' '}
+                    </td>
+                    <td className="diff-text">
+                      {l.text.replace(/\r$/, '')}
+                      {l.text.endsWith('\r') && <span className="muted" title="줄 끝이 CRLF입니다"> ␍</span>}
+                      {l.noEol && <span className="muted"> ⏎없음</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
 
 function VersionHistory({ snippetId, language, currentVersionNo }: { snippetId: string; language: string; currentVersionNo: number }) {
   const [selected, setSelected] = useState<number | null>(null)
@@ -55,6 +133,7 @@ function VersionHistory({ snippetId, language, currentVersionNo }: { snippetId: 
           더 보기
         </button>
       )}
+      <VersionDiff snippetId={snippetId} versionNos={items.map((v) => v.versionNo)} />
       {selected !== null && (
         <div aria-label={`v${selected} 원문`}>
           {selectedVersion.isLoading && <LoadingState />}

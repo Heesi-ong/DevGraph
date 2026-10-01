@@ -20,6 +20,8 @@ export interface SearchHit {
   framework: string | null
   favorite: boolean
   updatedAt: string
+  // scope=snippetHistory 결과에서만: 일치한 과거 버전 번호(§9.5)
+  versionNo?: number | null
 }
 
 export interface RecentItem {
@@ -49,6 +51,8 @@ export interface SearchFilters {
   language?: string
   framework?: string
   archived: boolean
+  // 과거 버전 코드 검색(`scope=snippetHistory`). 켜면 현재 버전은 대상이 아니다.
+  history: boolean
 }
 
 export const MIN_QUERY_LENGTH = 2

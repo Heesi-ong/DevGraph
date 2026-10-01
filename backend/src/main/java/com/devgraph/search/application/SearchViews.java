@@ -14,9 +14,10 @@ public final class SearchViews {
 	public record Segment(String text, boolean matched) {
 	}
 
+	/** `versionNo`는 `scope=snippetHistory` 결과에서만 채워진다(일치한 과거 버전 번호, §9.5). 기본 검색에서는 null. */
 	public record SearchHit(UUID id, String type, String title, String status, double score,
 			List<String> matchedFields, Map<String, List<Segment>> highlight, String language, String framework,
-			boolean favorite, Instant updatedAt) {
+			boolean favorite, Instant updatedAt, Integer versionNo) {
 	}
 
 	public record RecentItem(UUID id, String type, String title, Instant updatedAt) {

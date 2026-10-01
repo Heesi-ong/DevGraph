@@ -2,19 +2,19 @@
 
 개발자 지식·코드·문제 해결 경험을 그래프로 연결해 검색·재사용하는 개인용 Developer Knowledge Base.
 
-설계 기준 문서는 [DEVGRAPH_PRODUCT_DESIGN.md](DEVGRAPH_PRODUCT_DESIGN.md)(v2.0)이며, 각 챕터를 워드 문서로
+설계 기준 문서는 [DEVGRAPH_PRODUCT_DESIGN.md](DEVGRAPH_PRODUCT_DESIGN.md)(v2.1)이며, 각 챕터를 워드 문서로
 나눈 버전은 [docs-word/](docs-word)에 있다. 구현 시 이 문서를 Source of Truth로 삼는다.
 
 ## 현재 상태
 
-설계서 Phase 0~7 구현 완료.
+설계서 Phase 0~7 구현 완료, Phase 8(고도화) 1차 범위(운영 기반·검색/버전 이월 항목) 완료 — [계획과 결과](docs/PHASE8_PLAN.md).
 
 | 영역 | 내용 |
 |---|---|
 | 인증·계정 | 가입/로그인, Refresh rotation + 재사용 감지(응답 유실 10초 유예), 세션 목록·폐기, 재인증, 비밀번호 변경, 계정 삭제(7일 유예) |
-| 지식 | Concept/Note/Snippet(버전·복사 기록)/Error/Solution/Project/Resource, 태그·즐겨찾기, 보관·휴지통·영구 삭제 |
+| 지식 | Concept/Note/Snippet(버전·복사 기록·버전 diff)/Error/Solution/Project/Resource, 태그·즐겨찾기, 보관·휴지통·영구 삭제 |
 | 관계·그래프 | 타입 규칙이 있는 Relation, Backlink, focus/Workspace/Project Graph(상한·truncation 명시) |
-| 검색 | PostgreSQL FTS + trigram, 가중치 랭킹, 안전한 highlight |
+| 검색 | PostgreSQL FTS + trigram, 가중치 랭킹, 안전한 highlight, 한국어 본문 부분 일치, Snippet 과거 버전 검색 |
 | 데이터 | 비동기 Export(ZIP + manifest 무결성, 일회성 다운로드) |
 | 운영 | Docker Compose 배포, 백업/복원 스크립트와 복원 리허설, 구조화 로그, health, rate limit, 보안 헤더 |
 

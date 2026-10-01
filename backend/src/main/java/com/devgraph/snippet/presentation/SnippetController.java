@@ -99,6 +99,12 @@ public class SnippetController {
 		return service.getVersion(user.userId(), id, versionNo);
 	}
 
+	@GetMapping("/{id}/diff")
+	public SnippetService.DiffView diff(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id,
+			@RequestParam int from, @RequestParam int to) {
+		return service.diff(user.userId(), id, from, to);
+	}
+
 	@PostMapping("/{id}/usage")
 	@ResponseStatus(HttpStatus.NO_CONTENT)
 	public void usage(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id,

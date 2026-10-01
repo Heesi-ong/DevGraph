@@ -122,15 +122,24 @@ class SearchApiIntegrationTest extends AbstractIntegrationTest {
 	}
 
 	@Test
-	void koreanBodySubstringIsNotSearchableYet() {
+	void koreanBodySubstringIsSearchableAndRanksBelowExactTokenMatches() {
 		String token = signupToken();
 		call(HttpMethod.POST, "/api/v1/nodes", token,
-				Map.of("type", "NOTE", "title", "메모", "bodyMd", "JWT 만료시간을 논의했다"));
-		// 'simple' 설정은 형태소 분석이 없어 본문은 공백으로 나뉜 토큰 단위로만 일치한다(제목은 trigram으로 부분 일치).
-		// 조사가 붙은 한국어 본문의 부분 문자열 검색은 아직 지원하지 않는다 — 설계서 §15.4 한계.
-		// 이 검증은 한계를 명시하기 위한 것이며, 본문 trigram을 도입하면 기대값을 바꾼다.
-		assertThat(search(token, "만료시간을", "").hits()).hasSize(1);
-		assertThat(search(token, "만료시간", "").hits()).isEmpty();
+				Map.of("type", "NOTE", "title", "메모A", "bodyMd", "JWT 만료시간을 논의했다"));
+		call(HttpMethod.POST, "/api/v1/nodes", token,
+				Map.of("type", "NOTE", "title", "메모B", "bodyMd", "만료시간 정책을 정했다"));
+		// 조사가 붙은 본문("만료시간을")도 부분 문자열로 찾는다(Phase 8, 본문 trigram). 완전한 토큰("만료시간")이 있는 글이 먼저다.
+		var hits = search(token, "만료시간", "");
+		assertThat(titles(hits)).containsExactly("메모B", "메모A");
+		assertThat(JsonPath.<List<String>>read(hits.hit(1), "$.matchedFields")).contains("body");
+		assertThat(JsonPath.<List<Boolean>>read(hits.hit(1), "$.highlight.body[?(@.matched==true)].matched")).isNotEmpty();
+		// 부분 일치는 한 단어 안의 중간도 찾고, 와일드카드 문자는 문자 그대로만 일치한다.
+		assertThat(titles(search(token, "료시간을", ""))).containsExactly("메모A");
+		assertThat(search(token, "만%간", "").hits()).isEmpty();
+		// 2자 질의는 본문 부분 일치를 하지 않는다(trigram 인덱스를 못 타 느리다) — 완전한 토큰 일치와 제목 일치는 그대로다.
+		assertThat(titles(search(token, "논의", ""))).isEmpty(); // 본문엔 "논의했다"뿐
+		// 다른 사용자의 본문은 보이지 않는다.
+		assertThat(search(signupToken(), "만료시간", "").hits()).isEmpty();
 	}
 
 	// ---- validation --------------------------------------------------------------------------
@@ -235,6 +244,58 @@ class SearchApiIntegrationTest extends AbstractIntegrationTest {
 		assertThat(updated.getStatusCode()).isEqualTo(HttpStatus.OK);
 		assertThat(search(token, "legacyToken", "").hits()).isEmpty();
 		assertThat(titles(search(token, "moderntoken", ""))).containsExactly("Token helper");
+	}
+
+	@Test
+	void snippetHistoryScopeFindsOnlyPastVersionsWithTheirVersionNumber() {
+		String token = signupToken();
+		String id = snippet(token, "Token helper", "java", "String legacyToken() { return \"a\"; }");
+		var v2 = call(HttpMethod.PATCH, "/api/v1/snippets/" + id, token, Map.of("version", 0, "code", "String interimToken() { return \"b\"; }"));
+		assertThat(v2.getStatusCode()).isEqualTo(HttpStatus.OK);
+		call(HttpMethod.PATCH, "/api/v1/snippets/" + id, token, Map.of("version", 1, "code", "String modernToken() { return \"c\"; }"));
+		String other = snippet(token, "Current only", "java", "String onlyNowToken() {}");
+
+		// 기본 검색은 현재 버전(v3)만 본다. 과거 버전의 코드는 history 범위에서만 찾는다.
+		assertThat(search(token, "legacyToken", "").hits()).isEmpty();
+		var history = search(token, "legacyToken", "&scope=snippetHistory");
+		assertThat(titles(history)).containsExactly("Token helper");
+		assertThat((Integer) JsonPath.read(history.hit(0), "$.versionNo")).isEqualTo(1);
+		assertThat(JsonPath.<List<String>>read(history.hit(0), "$.matchedFields")).containsExactly("code");
+		assertThat(JsonPath.<List<String>>read(history.hit(0), "$.highlight.code[?(@.matched==true)].text")).isNotEmpty();
+		// 한 Snippet에서 여러 과거 버전이 일치하면 가장 최근의 과거 버전(v2) 하나만 나온다.
+		assertThat((Integer) JsonPath.read(search(token, "token()", "&scope=snippetHistory").hit(0), "$.versionNo")).isEqualTo(2);
+		// 현재 버전에만 있는 코드는 history에 나오지 않는다. 기본 검색 결과에는 versionNo가 없다.
+		assertThat(search(token, "modernToken", "&scope=snippetHistory").hits()).isEmpty();
+		assertThat(search(token, "onlyNowToken", "&scope=snippetHistory").hits()).isEmpty();
+		assertThat(JsonPath.<Object>read(search(token, "modernToken", "").hit(0), "$.versionNo")).isNull();
+		// 필터와 격리, 잘못된 scope.
+		assertThat(titles(search(token, "legacyToken", "&scope=snippetHistory&language=java"))).containsExactly("Token helper");
+		assertThat(search(token, "legacyToken", "&scope=snippetHistory&language=python").hits()).isEmpty();
+		assertThat(search(signupToken(), "legacyToken", "&scope=snippetHistory").hits()).isEmpty();
+		assertThat(call(HttpMethod.GET, "/api/v1/search?q=abc&scope=everything", token, null).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+		assertThat(other).isNotBlank();
+	}
+
+	@Test
+	void snippetHistoryPagesThroughAllMatchesWithoutRepeats() {
+		String token = signupToken();
+		List<String> expected = new ArrayList<>();
+		for (int i = 0; i < 5; i++) {
+			String id = snippet(token, "Paged " + i, "java", "int oldValue" + i + " = pagedMarker;");
+			call(HttpMethod.PATCH, "/api/v1/snippets/" + id, token, Map.of("version", 0, "code", "int fresh = " + i + ";"));
+			expected.add("Paged " + i);
+		}
+		List<String> seen = new ArrayList<>();
+		String cursor = null;
+		for (int guard = 0; guard < 10; guard++) {
+			var page = search(token, "pagedMarker", "&scope=snippetHistory&size=2" + (cursor == null ? "" : "&cursor=" + cursor));
+			seen.addAll(titles(page));
+			cursor = JsonPath.read(page.body, "$.cursor");
+			if (cursor == null) {
+				break;
+			}
+		}
+		assertThat(seen).hasSize(5).doesNotHaveDuplicates().containsExactlyInAnyOrderElementsOf(expected);
 	}
 
 	// ---- cursor contract ---------------------------------------------------------------------

@@ -42,7 +42,7 @@ import com.devgraph.workspace.application.WorkspaceQueryService;
 /**
  * 설계서 §9.5 통합 검색. 검색어 검증 → Workspace 범위 고정 → 후보·점수 계산(SQL) → 페이지에 오른 항목만
  * 발췌·하이라이트 구간 생성 → 0건이면 fallback 안내.
- * 범위 밖: `scope=snippetHistory`(과거 버전 검색, SRCH-02의 분리 옵션)는 이번 Phase에서 만들지 않았다.
+ * `scope=snippetHistory`(과거 버전 검색, SRCH-02의 분리 옵션)는 {@link #searchHistory}가 따로 처리한다 — 기본 검색에는 섞이지 않는다.
  */
 @Service
 public class SearchService {
@@ -102,6 +102,55 @@ public class SearchService {
 		return new SearchPage(hits, nextCursor, hasMore, fallback);
 	}
 
+	/**
+	 * SRCH-02: 과거 버전 코드 검색. Snippet마다 일치한 가장 최근의 과거 버전 하나만 보여 주고 버전 번호를 명시한다.
+	 * 현재 버전은 대상이 아니다(기본 검색이 이미 찾는다). 정렬은 `(updatedAt DESC, id ASC)`이며 점수는 없다.
+	 */
+	@Transactional(readOnly = true)
+	public SearchPage searchHistory(UUID userId, String rawQuery, UUID tagId, String language, String framework,
+			boolean includeArchived, String cursor, Integer requestedSize) {
+		long started = System.nanoTime();
+		String query = requireQuery(rawQuery);
+		int size = PageSize.resolve(requestedSize, DEFAULT_SIZE);
+		UUID workspaceId = workspaceQueryService.requireWorkspaceId(userId);
+		Set<NodeStatus> statuses = includeArchived ? EnumSet.of(NodeStatus.ACTIVE, NodeStatus.ARCHIVED)
+				: EnumSet.of(NodeStatus.ACTIVE);
+		Instant afterUpdated = null;
+		UUID afterId = null;
+		if (cursor != null && !cursor.isBlank()) {
+			try {
+				List<String> parts = CursorCodec.decode(cursor, 2);
+				afterUpdated = Instant.EPOCH.plus(Long.parseLong(parts.get(0)), ChronoUnit.MICROS);
+				afterId = UUID.fromString(parts.get(1));
+			} catch (RuntimeException e) {
+				throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "유효하지 않은 cursor입니다.");
+			}
+		}
+		Criteria criteria = new Criteria(workspaceId, userId, query, statuses.stream().map(Enum::name).toList(), List.of(),
+				tagId, normalizeFilter(language), normalizeFilter(framework), Instant.now());
+		List<String> terms = Highlighter.terms(query);
+		List<SearchQueryRepository.HistoryRow> rows = repository.searchHistory(criteria, terms.get(0), afterUpdated, afterId,
+				size + 1);
+		boolean hasMore = rows.size() > size;
+		List<SearchQueryRepository.HistoryRow> page = hasMore ? rows.subList(0, size) : rows;
+		String nextCursor = null;
+		if (hasMore) {
+			var last = page.get(page.size() - 1);
+			nextCursor = CursorCodec.encode(Long.toString(ChronoUnit.MICROS.between(Instant.EPOCH, last.updatedAt())),
+					last.id().toString());
+		}
+		List<SearchHit> hits = page.stream().map(r -> {
+			Map<String, List<Segment>> highlight = new LinkedHashMap<>();
+			highlight.put("title", Highlighter.segments(r.title(), terms, false, false));
+			highlight.put("code", Highlighter.segments(r.codeText(), terms, r.codeStart() > 1,
+					r.codeStart() - 1 + length(r.codeText()) < r.codeTotal()));
+			return new SearchHit(r.id(), "SNIPPET", r.title(), r.status(), 0, List.of("code"), highlight, r.language(),
+					r.framework(), r.favorite(), r.updatedAt(), r.versionNo());
+		}).toList();
+		record(hits.size(), started, hits.isEmpty());
+		return new SearchPage(hits, nextCursor, hasMore, null);
+	}
+
 	// ---- helpers ---------------------------------------------------------------------------
 
 	private Fallback fallback(Criteria criteria, List<String> terms) {
@@ -113,7 +162,7 @@ public class SearchService {
 		List<SearchHit> similar = repository.similarByTitle(criteria, FALLBACK_SIZE).stream()
 				.map(row -> new SearchHit(row.id(), row.type(), row.title(), row.status(), row.scoreKey() / 1_000_000.0,
 						List.of("title"), Map.of("title", Highlighter.segments(row.title(), terms, false, false)),
-						row.language(), row.framework(), row.favorite(), row.updatedAt()))
+						row.language(), row.framework(), row.favorite(), row.updatedAt(), null))
 				.toList();
 		List<RecentItem> recent = similar.isEmpty()
 				? repository.recent(criteria.workspaceId(), FALLBACK_SIZE).stream()
@@ -157,7 +206,7 @@ public class SearchService {
 			}
 		}
 		return new SearchHit(row.id(), row.type(), row.title(), row.status(), row.scoreKey() / 1_000_000.0, matched,
-				highlight, row.language(), row.framework(), row.favorite(), row.updatedAt());
+				highlight, row.language(), row.framework(), row.favorite(), row.updatedAt(), null);
 	}
 
 	private static int length(String text) {

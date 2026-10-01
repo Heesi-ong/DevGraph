@@ -64,6 +64,11 @@ public class SearchQueryRepository {
 			int codeTotal, String error, int errorStart, int errorTotal) {
 	}
 
+	/** 과거 버전 검색 결과 한 줄. `codeStart`는 1부터, `codeTotal`은 그 버전 코드의 전체 길이(문자). */
+	public record HistoryRow(UUID id, String title, String status, Instant updatedAt, String language, String framework,
+			boolean favorite, int versionNo, String codeText, int codeStart, int codeTotal) {
+	}
+
 	public record RecentRow(UUID id, String type, String title, Instant updatedAt) {
 	}
 
@@ -99,6 +104,52 @@ public class SearchQueryRepository {
 				rs.getString("language"), rs.getString("framework"), rs.getBoolean("favorite"), rs.getLong("score_key"),
 				rs.getBoolean("title_hit"), rs.getBoolean("tag_hit"), rs.getBoolean("lang_hit"),
 				rs.getBoolean("body_hit"), rs.getBoolean("code_hit"), rs.getBoolean("error_hit")));
+	}
+
+	/**
+	 * `scope=snippetHistory`. Snippet마다 코드에 검색어가 든 가장 최근의 **과거** 버전(현재 버전 제외)을 골라
+	 * `(updated_at DESC, id ASC)`로 보여 준다. 코드 부분 일치는 V6의 trigram 인덱스를 쓴다.
+	 */
+	public List<HistoryRow> searchHistory(Criteria c, String firstTerm, Instant afterUpdated, UUID afterId, int limit) {
+		MapSqlParameterSource params = params(c).addValue("term", firstTerm).addValue("limit", limit);
+		StringBuilder filters = new StringBuilder();
+		if (c.tagId() != null) {
+			filters.append(" AND EXISTS (SELECT 1 FROM node_tags ft WHERE ft.node_id = n.id AND ft.tag_id = :tagId)");
+		}
+		if (c.language() != null) {
+			filters.append(" AND s.language = :language");
+		}
+		if (c.framework() != null) {
+			filters.append(" AND s.framework = :framework");
+		}
+		String cursorClause = "";
+		if (afterUpdated != null) {
+			cursorClause = " WHERE (t.updated_at < :cUpdated) OR (t.updated_at = :cUpdated AND t.id > :cId)";
+			params.addValue("cUpdated", OffsetDateTime.ofInstant(afterUpdated, java.time.ZoneOffset.UTC)).addValue("cId", afterId);
+		}
+		String sql = """
+				SELECT t.* FROM (
+				  SELECT DISTINCT ON (n.id) n.id, n.title, n.status, n.updated_at, s.language, s.framework,
+				         (f.node_id IS NOT NULL) AS favorite, v.version_no,
+				         substr(v.code, greatest(1, strpos(lower(v.code), :term) - %d), %d) AS code_win,
+				         left(v.code, %d) AS code_head, strpos(lower(v.code), :term) AS code_pos, length(v.code) AS code_total
+				  FROM snippet_versions v
+				  JOIN snippets s ON s.node_id = v.snippet_node_id AND s.workspace_id = v.workspace_id
+				  JOIN knowledge_nodes n ON n.id = s.node_id AND n.workspace_id = s.workspace_id
+				  LEFT JOIN favorites f ON f.node_id = n.id AND f.user_id = :uid
+				  WHERE v.workspace_id = :ws AND n.status IN (:statuses) AND v.version_no < s.current_version_no
+				    AND v.code ILIKE :lcontains ESCAPE '!'%s
+				  ORDER BY n.id, v.version_no DESC
+				) t%s
+				ORDER BY t.updated_at DESC, t.id ASC LIMIT :limit""".formatted(LEAD, CODE_WINDOW, CODE_WINDOW, filters, cursorClause);
+		return jdbc.query(sql, params, (rs, i) -> {
+			int pos = rs.getInt("code_pos");
+			return new HistoryRow(rs.getObject("id", UUID.class), rs.getString("title"), rs.getString("status"),
+					instant(rs.getObject("updated_at", OffsetDateTime.class)), rs.getString("language"),
+					rs.getString("framework"), rs.getBoolean("favorite"), rs.getInt("version_no"),
+					pos > 0 ? rs.getString("code_win") : rs.getString("code_head"), pos > 0 ? Math.max(1, pos - LEAD) : 1,
+					rs.getInt("code_total"));
+		});
 	}
 
 	public int count(Criteria c) {
@@ -177,7 +228,7 @@ public class SearchQueryRepository {
 
 	/** 후보 선정 조건: 제목 부분 일치 · FTS · 태그 exact · 언어/framework · 코드 부분 일치 중 하나. */
 	private static String matchCondition() {
-		return "(h.title_contains OR h.fts_hit OR h.tag_hit OR h.lang_hit OR h.code_hit OR h.error_hit)";
+		return "(h.title_contains OR h.fts_hit OR h.tag_hit OR h.lang_hit OR h.code_hit OR h.error_hit OR h.body_contains)";
 	}
 
 	private static String scored(Criteria c, String matchCondition) {
@@ -202,20 +253,26 @@ public class SearchQueryRepository {
 				+ CASE WHEN code_hit THEN %s ELSE 0 END
 				+ CASE WHEN error_hit THEN %s ELSE 0 END
 				+ %s * body_rank
+				+ CASE WHEN body_contains THEN %s ELSE 0 END
 				+ CASE WHEN favorite THEN %s ELSE 0 END
 				+ %s * least(1, greatest(0, 1 - floor(extract(epoch from (cast(:rankingAt as timestamptz) - updated_at)) / 86400) / %d))""",
 				SearchRanking.EXACT_TITLE, SearchRanking.TITLE_PREFIX, SearchRanking.TITLE_CONTAINS,
 				SearchRanking.EXACT_TAG, SearchRanking.TITLE_FTS, SearchRanking.LANGUAGE_FRAMEWORK, SearchRanking.CODE,
-				SearchRanking.ERROR_MESSAGE, SearchRanking.BODY_FTS, SearchRanking.FAVORITE, SearchRanking.RECENCY_MAX, SearchRanking.RECENCY_DAYS);
+				SearchRanking.ERROR_MESSAGE, SearchRanking.BODY_FTS, SearchRanking.BODY_CONTAINS, SearchRanking.FAVORITE, SearchRanking.RECENCY_MAX, SearchRanking.RECENCY_DAYS);
+		// trigram은 3자 이상이어야 인덱스를 탄다. 2자 질의("쿼리")는 인덱스 없이 모든 본문을 훑어 질의당 수백 ms가 걸리므로(실측
+		// 720ms) 본문 부분 일치를 하지 않는다 — 그런 질의도 제목 부분 일치·본문 토큰(FTS) 일치는 그대로 동작한다.
+		String bodyContains = c.query().codePointCount(0, c.query().length()) >= 3
+				? "(n.id IN (SELECT b.id FROM knowledge_nodes b WHERE b.workspace_id = :ws AND lower(left(b.body_md, 100000)) LIKE :lcontains ESCAPE '!'))"
+				: "false";
 		return """
 				WITH q AS (SELECT websearch_to_tsquery('simple', :q) AS tsq)
 				SELECT t.*, round((%s)::numeric * 1000000)::bigint AS score_key FROM (
 				  SELECT n.id, n.node_type, n.title, n.status, n.updated_at, s.language, s.framework,
 				         (f.node_id IS NOT NULL) AS favorite,
 				         h.title_exact, h.title_prefix, h.title_contains, h.tag_hit, h.lang_hit, h.code_hit, h.error_hit,
-				         h.title_rank, h.body_rank,
+				         h.title_rank, h.body_rank, h.body_contains,
 				         (h.title_contains OR h.title_rank > 0) AS title_hit,
-				         (h.body_rank > 0) AS body_hit
+				         (h.body_rank > 0 OR h.body_contains) AS body_hit
 				  FROM knowledge_nodes n
 				  CROSS JOIN q
 				  LEFT JOIN snippets s ON s.node_id = n.id
@@ -232,6 +289,9 @@ public class SearchQueryRepository {
 				      coalesce(s.language = :lq OR s.framework = :lq, false) AS lang_hit,
 				      coalesce(v.code ILIKE :lcontains ESCAPE '!', false) AS code_hit,
 				      coalesce(er.error_message ILIKE :lcontains ESCAPE '!', false) AS error_hit,
+				      -- 부분 문자열 일치(조사가 붙은 한국어 등). 행마다 lower(left(..))를 계산하면 후보 전체에서 느리므로(실측: 질의당
+				      -- +80ms) 인덱스(V12, 같은 식)를 타는 서브쿼리를 한 번만 실행해 id 집합으로 비교한다.
+				      %s AS body_contains,
 				      (n.search_vector @@ q.tsq OR coalesce(er.search_vector @@ q.tsq, false)
 				          OR coalesce(sr.search_vector @@ q.tsq, false)) AS fts_hit,
 				      -- ts_rank_cd는 비싸다(행당 수십 µs). 코드 일치처럼 FTS와 무관하게 후보가 된 행(예: 'public class'가 모든
@@ -241,7 +301,7 @@ public class SearchQueryRepository {
 				               CASE WHEN er.search_vector @@ q.tsq THEN ts_rank_cd('{0,1,1,0}', er.search_vector, q.tsq, 34) ELSE 0 END,
 				               CASE WHEN sr.search_vector @@ q.tsq THEN ts_rank_cd('{0,1,1,0}', sr.search_vector, q.tsq, 34) ELSE 0 END) AS body_rank) h
 				  WHERE n.workspace_id = :ws AND n.status IN (:statuses)%s AND %s
-				) t""".formatted(score, filters, matchCondition);
+				) t""".formatted(score, bodyContains, filters, matchCondition);
 	}
 
 	private static MapSqlParameterSource params(Criteria c) {
