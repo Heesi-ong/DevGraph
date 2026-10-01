@@ -1,0 +1,11 @@
+# 기본 규칙을 그대로 쓰고, 시크릿 감지기의 테스트 fixture(의도적으로 만든 가짜 값)만 경로로 제외한다.
+# 이 경로 밖에서 발견되는 것은 실제 유출로 취급한다.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "SecretScanner 테스트/E2E의 가짜 secret fixture"
+paths = [
+  '''backend/src/test/java/com/devgraph/snippet/SecretScannerTest\.java''',
+  '''frontend/e2e/snippet\.spec\.ts''',
+]

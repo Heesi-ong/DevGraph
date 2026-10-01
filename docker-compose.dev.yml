@@ -25,6 +25,7 @@ services:
       ALLOWED_ORIGINS: http://localhost:5173
       COOKIE_SECURE: "false"
       SPRING_PROFILES_ACTIVE: dev
+      MANAGEMENT_PORT: "8081"
     ports:
       - "8080:8080"
     depends_on:

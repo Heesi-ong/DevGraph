@@ -17,5 +17,5 @@ WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
 USER devgraph
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s CMD curl -fs http://localhost:8080/actuator/health/liveness || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s CMD curl -fs http://localhost:${MANAGEMENT_PORT:-8080}/actuator/health/liveness || exit 1
 ENTRYPOINT ["java", "-jar", "app.jar"]

@@ -27,6 +27,8 @@ ext['jackson-2-bom.version'] = '2.21.7'
 dependencies {
 	// Redis, WebSocket, S3는 설계서 §0/§18.2/§25에서 명시적으로 제외한 항목이라 의존성에 넣지 않는다.
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	// Prometheus 형식 지표(management 포트에서만 노출, docs/PHASE8_PLAN.md §1)
+	runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.springframework.boot:spring-boot-starter-security'

@@ -30,6 +30,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?}
       APP_VERSION: ${APP_VERSION:-dev}
       EXPORT_TEMP_DIR: /var/devgraph/export
+      MANAGEMENT_PORT: "8081"
     volumes:
       - devgraph-export:/var/devgraph/export
     depends_on:
@@ -37,6 +38,7 @@ services:
         condition: service_healthy
     expose:
       - "8080"
+      - "8081"   # management(health/metrics): 같은 compose 네트워크 안에서만 접근
 
   frontend:
     build: ./frontend

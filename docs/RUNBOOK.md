@@ -22,7 +22,8 @@ scripts/backup.sh backups        # pg_dump -Fc, 권한 600, 목차 검증, 7일 
 ```
 
 - 일 1회 실행을 권장한다(cron 예: `15 3 * * * cd /srv/devgraph && scripts/backup.sh /srv/backups`). RPO 24h 목표가 이 주기에 의존한다.
-- 덤프는 개인 데이터다. 호스트 밖으로 복사할 때는 암호화한다. 이 저장소는 백업 전송/암호화를 구현하지 않는다(알려진 제한).
+- 덤프는 개인 데이터다. **암호화:** `BACKUP_PASSPHRASE_FILE=/path/to/pass.txt scripts/backup.sh`로 실행하면 `*.dump.gpg`(gpg 대칭 AES256)가 만들어지고 평문 덤프는 디스크에 쓰이지 않는다. 암호 파일(예: `openssl rand -base64 32 > pass.txt; chmod 600`)은 **덤프와 다른 곳에 보관**해야 하며, 잃어버리면 백업을 열 수 없다. 복원·리허설 스크립트는 `.gpg`를 같은 환경변수로 복호화한다.
+- **오프사이트 전송:** `BACKUP_UPLOAD_CMD`(파일 경로가 마지막 인자로 붙는 명령, 예: 래퍼 스크립트로 `rclone copyto`)를 주면 백업 직후 실행한다. 암호화 없이는 거부한다. 전송 대상의 접근 제어와 보존은 운영자가 정한다.
 - Export 임시 파일(`devgraph-export` 볼륨)은 백업 대상이 아니다. 만료 정리 배치가 지운다.
 
 ## 3. 복원
@@ -43,6 +44,16 @@ scripts/restore.sh backups/devgraph-XXXX.dump --yes         # backend 중지 →
 ```
 
 복원 뒤 `liveness` UP과 로그인을 확인한다. RTO 4h 목표 대비 측정 결과는 `docs/NFR_REPORT.md`에 있다.
+
+## 3.1 지표
+
+backend는 `MANAGEMENT_PORT`(compose 기본 8081)에서 `/actuator/health/*`, `/actuator/metrics`, `/actuator/prometheus`를 연다. 이 포트는 호스트에 공개하지 않고 nginx도 `liveness` 한 경로만 프록시한다. 지표를 보려면 같은 compose 네트워크에서 접근한다.
+
+```bash
+docker compose -f docker-compose.prod.yml exec frontend wget -qO- http://backend:8081/actuator/prometheus | grep ^devgraph_
+```
+
+사용량 지표는 횟수만 담는다: `devgraph_activity_total{action=…}`(Node/관계 상태 변경), `devgraph_snippet_copy_total`, `devgraph_search_zero_results_total`, `devgraph_graph_*`, `devgraph_export_*`. 제목·본문·검색어·사용자 식별자는 지표에 들어가지 않는다(테스트로 검증). 수집 파이프라인(Prometheus 서버 등)은 구성하지 않았다 — 필요하면 위 포트를 내부에서 scrape한다.
 
 ## 4. 점검과 장애 대응
 

@@ -40,6 +40,19 @@ public class SecurityConfig {
 	private final RateLimiter rateLimiter;
 	private final RateLimitProperties rateLimitProperties;
 
+	// management 포트가 분리됐을 때만 `local.management.port`가 생긴다(포트를 0으로 주면 실제 포트가 여기 채워진다).
+	// 분리되지 않았다면 -1이라 비프로브 actuator는 인증이 필요하다.
+	@org.springframework.beans.factory.annotation.Autowired
+	private org.springframework.core.env.Environment environment;
+
+	/** 분리된 management 포트로 들어온 actuator 요청인가. 포트가 분리되지 않았다면(두 포트가 같다면) 항상 false다. */
+	private boolean isManagementPortActuatorRequest(jakarta.servlet.http.HttpServletRequest request) {
+		int management = environment.getProperty("local.management.port", Integer.class, -1);
+		int server = environment.getProperty("local.server.port", Integer.class, -1);
+		return management > 0 && management != server && request.getLocalPort() == management
+				&& request.getRequestURI().startsWith("/actuator");
+	}
+
 	@Value("${devgraph.cors.allowed-origins}")
 	private String allowedOriginsCsv;
 
@@ -63,7 +76,10 @@ public class SecurityConfig {
 								"/api/v1/auth/refresh").permitAll()
 						// Export 다운로드는 브라우저가 링크로 여는 일회성 token URL이라 Bearer 없이 접근한다(토큰이 인증이다).
 						.requestMatchers(HttpMethod.GET, "/api/v1/exports/*/download").permitAll()
-						.requestMatchers("/actuator/**", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
+						// 프로브는 공개, 그 밖의 actuator(metrics 등)는 별도 management 포트로 들어온 요청만 연다.
+						// 실수로 main 포트에 노출 설정을 해도 지표가 공개되지 않게 하는 이중 방어다.
+						.requestMatchers("/actuator/health/**", "/actuator/info", "/v3/api-docs/**", "/swagger-ui/**").permitAll()
+						.requestMatchers(this::isManagementPortActuatorRequest).permitAll()
 						.anyRequest().authenticated())
 				// §14.1: 인증 실패는 빈 403이 아니라 표준 envelope의 401(AUTH_REQUIRED)이어야 한다.
 				.exceptionHandling(handling -> handling

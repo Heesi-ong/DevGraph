@@ -22,3 +22,10 @@ springdoc:
     enabled: false
   swagger-ui:
     enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # metrics/prometheus는 분리된 management 포트(compose에서는 호스트·nginx에 공개하지 않음)에서만 응답한다.
+        include: health,info,metrics,prometheus

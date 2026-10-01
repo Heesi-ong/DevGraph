@@ -17,7 +17,10 @@ cleanup
 docker run -d --name "$NAME" -e POSTGRES_DB=devgraph -e POSTGRES_USER=devgraph -e POSTGRES_PASSWORD="$PGPASS" postgres:16-alpine >/dev/null
 for _ in $(seq 1 30); do docker exec "$NAME" pg_isready -U devgraph -d devgraph >/dev/null 2>&1 && break; sleep 1; done
 START=$(date +%s)
-docker exec -i "$NAME" pg_restore -U devgraph -d devgraph --no-owner --exit-on-error < "$DUMP"
+case "$DUMP" in
+  *.gpg) gpg --batch --quiet --pinentry-mode loopback --passphrase-file "${BACKUP_PASSPHRASE_FILE:?암호화된 덤프에는 BACKUP_PASSPHRASE_FILE이 필요합니다}" --decrypt "$DUMP" ;;
+  *) cat "$DUMP" ;;
+esac | docker exec -i "$NAME" pg_restore -U devgraph -d devgraph --no-owner --exit-on-error
 echo "복원 소요: $(( $(date +%s) - START ))초"
 
 # 테이블별 (행 수, 내용 해시)를 같은 SQL로 뽑아 비교한다. 내용 해시는 행 텍스트를 정렬해 md5한 값이다.

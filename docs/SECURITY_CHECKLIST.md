@@ -17,9 +17,10 @@
 | 11 | 로그 | ✅ | 요청당 1줄 JSON: 본문·헤더·쿠키·query 미기록, `userIdHash`만 기록, 클라이언트가 보낸 request id를 신뢰하지 않음 |
 | 12 | 의존성 취약점 | ⚠️ | Trivy(이미지) 기준 backend Java 의존성 CRITICAL/HIGH **0**(Tomcat 11.0.26, BouncyCastle 1.86, Jackson 3.1.7/2.21.7로 상향해 해소), OS 패키지 0. 남은 것: 기반 이미지에 포함된 `usr/bin/pebble`(Go 바이너리) HIGH 14건 — 우리 코드가 실행/노출하지 않지만 기반 이미지 갱신 때 사라지는지 재검사 필요. 프론트 `npm audit --omit=dev`: CRITICAL/HIGH 0, low 2(monaco-editor가 포함한 dompurify; 우리가 DOMPurify를 직접 쓰지 않으며 `npm audit fix --force`는 monaco 다운그레이드라 보류). dev 전용 moderate 2(vitest 계열) |
 | 13 | 컨테이너 | ✅ | backend 비root 사용자, backend/postgres 호스트 포트 미공개, 시크릿은 환경변수(`.env`는 gitignore) |
-| 14 | 시크릿 스캔(저장소) | ⬜ | gitleaks 등 이력 스캔은 실행하지 않았다. 커밋 전 1회 실행 권장 |
+| 14 | 시크릿 스캔(저장소) | ✅ | gitleaks로 전체 이력(14커밋) 스캔: 발견 7건은 모두 시크릿 감지기 테스트의 의도적 가짜 fixture(`SecretScannerTest`, `snippet.spec.ts`)여서 해당 경로만 `.gitleaks.toml`로 제외했고, 그 밖은 0건. CI `secrets` 잡이 매 푸시마다 전체 이력을 다시 스캔한다 |
 | 15 | 동적 보안 스캔(ZAP 등), 침투 테스트 | ⬜ | 하지 않았다. 위 점검은 "OWASP Top 10 기본 점검"의 자동화 가능한 부분이며 전문 점검을 대체하지 않는다 |
-| 16 | 백업 암호화·오프사이트 | ⬜ | 구현하지 않았다(Runbook §2 제한) |
+| 16 | 백업 암호화·오프사이트 | ✅ | `BACKUP_PASSPHRASE_FILE`로 gpg AES256 암호화(평문 덤프가 디스크에 남지 않음), 암호화된 덤프로 복원 리허설 통과, 암호화 없는 업로드는 거부. 전송 명령·암호 보관은 운영자 책임(Runbook §2) |
+| 17 | 지표 노출 | ✅ | 지표는 분리된 management 포트에서만 응답. 외부(nginx·호스트)에서 접근 불가, main 포트 설정 실수에도 보안 규칙이 막음, 지표에 개인 내용 없음(`MetricsExposureIntegrationTest`) |
 
 ## OWASP Top 10 대응 요약
 

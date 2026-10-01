@@ -69,10 +69,13 @@ public class SnippetService {
 	private final WorkspaceQueryService workspaceQueryService;
 	private final ApplicationEventPublisher events;
 
+	private final io.micrometer.core.instrument.MeterRegistry metrics;
+
 	public SnippetService(NodeCommandService nodeCommandService, NodeQueryService nodeQueryService,
 			SnippetRepository snippetRepository, SnippetVersionRepository versionRepository,
 			SnippetQueryRepository queryRepository, WorkspaceQueryService workspaceQueryService,
-			ApplicationEventPublisher events) {
+			ApplicationEventPublisher events, io.micrometer.core.instrument.MeterRegistry metrics) {
+		this.metrics = metrics;
 		this.nodeCommandService = nodeCommandService;
 		this.nodeQueryService = nodeQueryService;
 		this.snippetRepository = snippetRepository;
@@ -248,6 +251,7 @@ public class SnippetService {
 		if (snippetRepository.recordUse(nodeId, workspaceId) == 0) {
 			throw notFound();
 		}
+		metrics.counter("devgraph.snippet.copy").increment(); // 횟수만, Snippet 식별자는 태그로 쓰지 않는다
 	}
 
 	// ---- validation ------------------------------------------------------------------------

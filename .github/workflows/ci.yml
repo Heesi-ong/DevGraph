@@ -89,3 +89,13 @@ jobs:
             frontend/playwright-report/
             frontend/test-results/
           if-no-files-found: ignore
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # 전체 이력을 스캔한다
+      # 설정은 저장소 루트의 .gitleaks.toml(테스트 fixture 경로만 제외)
+      - name: Scan history for secrets
+        run: docker run --rm -v "$PWD":/repo ghcr.io/gitleaks/gitleaks:latest git /repo --redact --no-banner

@@ -17,6 +17,9 @@ server:
   port: 8080
 
 management:
+  server:
+    # 비어 있으면 앱과 같은 포트. 운영(compose)은 8081로 분리해 지표를 내부 네트워크에만 둔다.
+    port: ${MANAGEMENT_PORT:}
   endpoints:
     web:
       exposure:
