@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { logout } from '../features/auth/api'
 import { useAuthStore } from '../features/auth/authStore'
+import { GlobalSearchBox } from '../features/search/GlobalSearchBox'
 
 export function AppShell() {
   const user = useAuthStore((state) => state.user)
@@ -24,6 +25,7 @@ export function AppShell() {
           <NavLink to="/snippets">Snippets</NavLink>
           <NavLink to="/graph">Graph</NavLink>
         </nav>
+        <GlobalSearchBox />
         <span className="muted small">
           {user?.displayName} · {workspace?.name ?? '개인 Workspace'}
         </span>

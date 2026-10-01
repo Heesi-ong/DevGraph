@@ -1,6 +1,6 @@
 # DevGraph 제품·서비스·기술 설계서
 
-> 문서 상태: 기준안 v1.7 (Phase 0~4 구현 결과 반영)  
+> 문서 상태: 기준안 v1.8 (Phase 0~5 구현 결과 반영)  
 > 작성일: 2026-09-28  
 > 대상: Product, UX, Frontend, Backend, QA, 운영 담당 및 구현 에이전트  
 > 문서 목적: 별도 구두 설명 없이 MVP와 1.0 구현을 시작할 수 있는 Source of Truth
@@ -12,6 +12,8 @@
 > **v1.3 변경 요약:** 재인증 저장 모델을 `auth_session_families`(안정 세션 식별자) + `auth_sessions`(rotation 이력) + `reauth_tokens`(family당 1개, purpose 4종)로 확정하고 Access JWT `sid = token_family_id`, family 절대 만료(`absolute_expires_at`, 기본 90일)를 도입(§12.1, §12.3, §17.2), `GET/DELETE /auth/sessions`를 family 기준 API로 재설계(§14.2), Relation 의미 계약을 확정 — 시스템 13종 닫힌 집합 유지, 사용자 정의 Relation을 1.0에서 Growth로 이동(§9.4, §13.2, §18.1, §25, §9.9), Self-loop를 애플리케이션 사전검증(400) + DB CHECK(최종 방어) 이중 구조로 확정하고 `relation_types.allow_self_loop` 같은 예외 컬럼은 추가하지 않기로 결정(PostgreSQL CHECK의 교차 테이블 조회 불가 제약, §12.3), `APPLIED_IN` Source를 Solution 전용으로 정정해 §9.7 체인과의 기존 불일치를 제거, 모든 DB constraint에 명시적 이름 규칙을 도입하고 SQLState+이름 기반 예외 변환을 infrastructure 계층 책임으로 명시(§12.2, §15.2)했다.
 >
 > **v1.4 변경 요약:** Node 영구 삭제 cascade에 누락됐던 `node_views`/`layout_positions`를 추가하고 API의 `HAS_DEPENDENCIES`를 제거해 `TRASHED` 전제조건 + `409 INVALID_NODE_STATE`로 통일(§11.3, §14.3), 계정 탈퇴에 `POST /account/deletion-cancel`과 `DELETION_PENDING` 상태를 추가(§9.1, §14.2), `must_change_password`(§17.8 강제 비밀번호 재설정)와 `DELETION_PENDING`을 Access JWT `restriction` claim 기반의 단일 화이트리스트 필터로 통합(§17.2.3 신설), `users.must_change_password`/`status`, `auth_session_families.device_label` 컬럼 추가와 `revoke_reason`에서 중복이던 `ACCOUNT_DELETED`를 `ACCOUNT_DELETION_REQUESTED`로 단일화(§12.3), 회원가입에서 실사용 계획이 없는 `termsVersion`을 제거(§9.1, §14.2), `POST/GET /relation-types`를 실제 구현 범위(GET은 시스템 13종만, POST는 Growth로 라우트 자체를 만들지 않음)에 맞게 정정(§14.5), reauth 토큰 소비를 조건부 `UPDATE ... RETURNING` 기반 원자적 단일 소비로 명시(§17.2.2), 검색 `search_vector`에서 태그를 제외하고 join 기반 스코어링으로 전환해 벡터 갱신 시점 미결 문제를 제거(§15.4)했다. 세부 근거는 각 절 하단의 결정 사유를 참고한다.
+>
+> **v1.8 변경 요약:** Phase 5(Search) 구현 결과를 반영했다. `GET /search`의 실제 계약(검증, 필터, cursor, 구조화 highlight, 0건 fallback)을 §14.6에, 랭킹 가중치 조정(**정확 제목 일치 100 → 300**, 제목 부분 일치 +35 추가)과 한국어 본문 검색의 한계, 본문 색인 범위(앞 100,000자)를 §9.5·§15.4에, 구현 결과와 이월 항목을 §19에 기록했다.
 >
 > **v1.7 변경 요약:** Phase 4(Relation & Graph) 구현 결과를 반영했다. Relation 검증 순서·오류 코드, 대칭 관계의 응답 정규화, `GET /relations/target-candidates`(Relation Picker용 보조 endpoint), Node 상세의 `relations`, Graph focus의 BFS·상한·확장 후보, Workspace Graph의 페이지 경계 edge 한계를 §14.5에, 구현 결과와 이월 항목을 §19에 기록했다. 테스트 중 확인된 사실로 `LIKE` 검색의 와일드카드 이스케이프 공통화(§15.2)를 남겼다.
 >
@@ -381,11 +383,12 @@ DevGraph
 - 최소 검색어 길이는 2자(위 1번)이며, 자모 단위 입력은 서버에 보내지 않는다.
 - **Zero-result fallback:** 정확 조건으로 0건이면 (1) 타입/태그/언어 필터를 해제한 재검색 결과 개수를 함께 안내하고, (2) trigram threshold를 `0.1`로 완화한 재시도 결과를 "유사 결과"로 구분해 보여준다. 두 재시도 모두 0건이면 최근 생성/최근 조회 항목을 대체 제안한다.
 
-초기 랭킹 가중치:
+초기 랭킹 가중치(v1.8에서 구현하며 조정한 값 포함 — 아래 표 아래 "구현 조정" 참고):
 
 ```text
-exact title                 +100
+exact title                 +300  (설계 초안 +100)
 title prefix                 +70
+title contains (추가)        +35
 exact tag                    +60
 title full-text rank         +50 × normalized_rank
 snippet language/framework   +45
@@ -395,7 +398,9 @@ favorite                      +5
 recently used/updated         +0..5 (30일 이내 완만한 감쇠)
 ```
 
-랭킹은 SQL 상수 또는 설정 클래스로 중앙화하고 검색 회귀 테스트로 관리한다. 최신성 때문에 오래된 정확 일치가 밀리지 않도록 최신성 점수 상한을 낮게 둔다.
+랭킹은 SQL 상수 또는 설정 클래스로 중앙화하고 검색 회귀 테스트로 관리한다.
+
+**구현 조정(v1.8, fixture에서 확인):** ① 정확 제목 일치를 100에서 **300**으로 올렸다. 100이면 "제목 접두어 70 + 코드 일치 40 + 제목 FTS"처럼 약한 일치가 겹친 항목이 제목이 정확히 같은 항목을 앞질렀다(`JWT` 검색에서 코드에 `jwt`가 든 Snippet이 `JWT` Concept보다 위). 정확 일치가 나머지 모든 일치의 합(70+60+50+45+40+25=290)보다 크도록 둔다. ② 단어 중간의 부분 일치(`sec` → `Spring Security`)를 위해 **제목 부분 일치 +35**를 추가했다(접두어보다 낮게). ③ 정확/접두어/부분 일치는 가장 높은 하나만 적용한다(누적하지 않음). ④ 최신성은 연속 감쇠가 아니라 **하루 단위 계단식**으로 둔다 — 연속이면 페이지를 넘기는 사이 `now()`가 바뀌어 `score_key`가 흔들려 cursor가 어긋난다. ⑤ 코드 점수는 부분 문자열 일치를 similarity 1.0으로 본다(대소문자 무시). 대용량 코드에서 행마다 trigram 유사도를 계산하는 비용을 피하기 위한 단순화이며, 유사도 계산은 0건 fallback에서만 쓴다. 최신성 때문에 오래된 정확 일치가 밀리지 않도록 최신성 점수 상한을 낮게 둔다.
 
 ### 9.6 Project
 
@@ -1118,6 +1123,8 @@ Clipboard 자체는 Frontend에서 수행한다. usage API 실패가 복사를 �
 
 ### 14.6 Search, Project, Problem, Data API
 
+_(검색의 구현 계약은 이 표 아래 "Phase 5 구현 범위" 참고)_
+
 | Method / Endpoint | 기능 | Request → Response | 권한 | 주요 오류 |
 |---|---|---|---|---|
 | `GET /search?q=` | 통합 검색 | filters,cursor,size → ranked hits + matchedFields | Member | 400 QUERY_TOO_SHORT |
@@ -1131,6 +1138,17 @@ Clipboard 자체는 Frontend에서 수행한다. usage API 실패가 복사를 �
 | `POST /imports` | DevGraph import(Growth) | multipart + strategy + `X-Reauth-Token`(`purpose=IMPORT_CREATE`) → `202` | Owner; §17.2.2 재인증 필요 | 401 REAUTH_REQUIRED, 403 REAUTH_PURPOSE_MISMATCH, 400 SCHEMA_UNSUPPORTED |
 
 Export는 §9.8/§12.3에서 확정한 대로 항상 `export_jobs`를 거치는 비동기 방식 하나만 사용한다(동기 streaming 대안은 두지 않는다). `downloadUrl`은 `download_token_hash`로 검증되는 일회성 URL이며 15분 후 만료된다.
+
+**Phase 5 구현 범위와 세부 계약(v1.8 확정)**
+
+- **`GET /search?q&types&tagId&language&framework&archived&cursor&size`:** 휴지통은 항상 제외, `archived=true`일 때만 보관 항목 포함, 기본 `size` 20(최대 100). 대상은 현재 구현된 Concept/Note/Snippet이며 다른 타입은 해당 Phase에서 `title/summary/body`가 같은 규칙으로 검색된다.
+- **검색어 검증:** 공백을 정리한 뒤 2자 미만이거나 **한글 자모(조합 중인 글자)만**으로 된 입력은 `400 QUERY_TOO_SHORT`, 200자 초과는 `400`. 화면도 같은 규칙(`isSearchable`)으로 서버 호출 없이 최근 검색어·최근 항목을 보여 준다.
+- **후보와 점수:** Workspace로 범위를 먼저 고정한 뒤 제목 부분 일치 · `search_vector` FTS(`websearch_to_tsquery('simple', q)`, 문법 오류가 나지 않는다) · 태그 정확 일치 · Snippet 언어/framework 정확 일치 · Snippet **현재 버전** 코드 부분 일치 중 하나라도 맞으면 후보다. 정렬은 `(score_key DESC, updated_at DESC, id ASC)`, `score_key = round(score×1e6)::bigint`. cursor는 `(scoreKey, updatedAt(마이크로초), id)`의 opaque 조합이고 방향별로 펼친 조건으로 비교한다. 점수·updatedAt이 모두 같은 행은 id 순으로 안정적으로 나뉜다(통합 테스트가 25행 동점으로 확인).
+- **응답:** `{items, cursor, hasMore, fallback}`. 각 `items[]`는 `{id, type, title, status, score, matchedFields[title|tag|language|body|code], highlight{title, summary?, body?, code?}, language, framework, favorite, updatedAt}`. `highlight`의 각 필드는 `{text, matched}` 구간 배열이고 `text`는 원문 그대로다. 본문·코드는 전체가 아니라 **첫 일치 주변의 발췌**(본문 약 220자, 코드 약 240자)이며 앞/뒤가 잘렸으면 `"…"` 구간을 붙인다. 발췌는 페이지에 오른 항목만 2단계로 가져온다.
+- **0건 fallback(첫 페이지만):** `fallback={unfilteredCount, similar[], recent[]}` — 필터가 있었다면 필터를 풀었을 때의 건수(`unfilteredCount`, 필터가 없으면 `null`), 제목 trigram 유사도 ≥ 0.1인 "유사 결과", 유사 결과도 없으면 최근 수정 항목 5개. 결과가 있으면 `fallback`은 `null`이다.
+- **지표:** `devgraph.search.duration`(태그 `result=hit|zero`)과 `devgraph.search.zero_results`. **검색어는 지표·로그에 남기지 않는다**(길이와 건수만, 개인 지식이므로).
+- **보안:** 모든 값은 바인드 파라미터이며 `%` `_`는 문자 그대로 검색된다(`LikeEscape`). SQL 조각은 서버 상수뿐이다. `'; drop table …`, `& | ! (`, `foo:*` 같은 입력이 오류 없이 처리됨을 테스트로 확인했다.
+- **제외/이월:** `scope=snippetHistory`(과거 버전 검색), 사용자 검색 rate limit(Phase 7), Relation Picker의 후보 검색은 "허용 타입·미연결" 조건이 있어 통합 검색으로 교체하지 않고 전용 endpoint를 유지한다.
 
 ### 14.7 공통 스키마 참고
 
@@ -1281,6 +1299,9 @@ knowledge/
 - `knowledge_nodes.search_vector`는 title(A), summary/body(C)만 가중한 tsvector를 저장한다. **태그는 여기 포함하지 않는다.**
 - 태그 일치는 `node_tags + tags` 조인으로 별도 계산한다(exact match면 §9.5의 고정 `+60`). tag 이름이 바뀌어도 `search_vector`를 다시 만들 필요가 없다 — "서비스 트랜잭션에서 갱신할지 조회 시 합산할지" 미결이었던 문제를 애초에 없앤다.
 - Snippet code는 자연어 FTS와 성격이 달라 trigram 또는 normalized token 검색을 별도로 합친다.
+- **색인 범위와 FTS 설정(v1.8):** `search_vector`는 `'simple'` 설정(형태소 분석 없음, 소문자 + 공백·구두점 분리)의 생성 컬럼이다. tsvector는 값 하나가 1 MB를 넘으면 오류이므로 본문은 **앞 100,000자만** 색인한다(그 뒤 내용은 FTS 대상이 아니며, 1 MB 본문 저장이 실패하지 않는지와 뒤쪽 토큰이 검색되지 않는지를 테스트로 확인했다). 제목은 `lower(title)` trigram GIN, 코드는 `snippet_versions.code` trigram GIN(V6)으로 부분 일치를 한다.
+- **한국어 한계(v1.8 확인):** 본문은 공백으로 나뉜 토큰 단위로만 일치한다. 조사가 붙은 본문(`만료시간을`)은 그 형태 그대로 검색해야 맞고 `만료시간`으로는 찾지 못한다. 제목은 trigram이라 부분 일치(`격리` → `Transaction 격리 수준`)가 된다. 본문 부분 일치가 필요하면 본문 trigram 인덱스(크기 부담)나 PGroonga/OpenSearch를 검토한다 — 통합 테스트가 이 한계를 명시적으로 고정해 둔다.
+- **인덱스 활용:** 단일 SQL은 후보 조건이 `OR`로 이어져 여러 테이블(코드는 `snippet_versions`)에 걸쳐 있어 전체 후보에 대해 인덱스 하나로 푸시다운되지 않는다. Workspace 범위 개인 KB(수만 건)에서는 허용하는 단순화이며, 각 조건이 인덱스 가능한 형태인지는 쿼리 플랜 테스트로 확인했다. 느려지면 조건별 `UNION ALL`로 나눈다.
 - 한국어 형태소 분석은 기본 PostgreSQL 설정만으로 제한이 있다. MVP는 trigram/부분 일치로 보완하고, 실제 한국어 검색 실패 로그가 축적되면 PGroonga/OpenSearch를 검토한다.
 
 ### 15.5 API 문서와 Migration
@@ -1652,6 +1673,9 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - DB: search_vector와 GIN/GiST index, query plan 검증.
 - 테스트: 랭킹 fixture, 한국어/영어/코드 symbol, workspace isolation, explain analyze snapshot.
 - 완료 조건: 제목 exact가 본문 match보다 우선하고, 정해진 dataset에서 대표 20개 query의 기대 상위 결과가 회귀 테스트를 통과한다.
+- **구현 결과(v1.8):** 범위를 구현했고 통과한다 — 백엔드 통합 테스트 17개(대표 20개 query의 상위 결과 fixture, 제목 exact 우선, 즐겨찾기 tie-break, 한국어 제목 부분 일치·본문 토큰 일치와 한계, 2자 미만·자모·길이 검증, 악성 입력·와일드카드·SQL 인젝션, Workspace 격리(0건 안내에도 누출 없음), 타입·언어·framework·태그·보관 필터, Snippet 현재 버전만 검색, cursor 전 페이지 순회 일치와 동점 id 순서, 구조화 highlight(HTML 원문 보존)·발췌 줄임표, 1 MB 본문 저장, 0건 fallback 세 단계, 쿼리 플랜의 인덱스 사용 가능성, 지표에 검색어 없음), Playwright E2E 5개(`/` 단축키와 전역 검색, 일치 필드·하이라이트, 키보드만으로 결과 이동·열기, 2자 미만 입력은 서버 호출 없이 최근 항목, 필터의 URL 유지·0건 안내·더 보기·유사 결과, 위험한 코드의 비실행).
+- **구현·검증 중 발견해 수정한 결함:** ① 정확 제목 일치(+100)가 약한 일치의 합에 밀려 코드에 같은 단어가 든 Snippet이 위로 올라오던 랭킹 문제(→ 300), ② `score_key`가 같은 SELECT의 별칭이라 cursor 조건에서 참조할 수 없던 쿼리 구조(→ 한 겹 더 감쌈).
+- **이월/미정의 항목:** ① `scope=snippetHistory`, 검색 rate limit. ② 한국어 본문 부분 일치(위 한계). ③ 본문 100,000자 이후는 FTS 대상 아님. ④ 후보 조건의 `OR` 결합으로 인한 인덱스 푸시다운 한계(규모가 커지면 `UNION ALL`). ⑤ `query plan`은 데이터가 적어 planner가 순차 스캔을 고르므로 실제 인덱스 사용은 `enable_seqscan=off`로 가능성만 확인했다 — 대용량 데이터의 `EXPLAIN ANALYZE` 스냅샷은 운영 데이터가 생긴 뒤 측정한다. ⑥ Error/Solution/Project 전용 필드(error message, solution body 등)는 해당 타입을 만드는 Phase 6에서 검색 대상에 추가한다.
 
 ### Phase 6 — Project / Error / Solution (1.0)
 

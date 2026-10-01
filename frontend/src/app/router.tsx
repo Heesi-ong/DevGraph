@@ -8,6 +8,7 @@ import { NodeCreatePage, NodeEditPage } from '../pages/NodeFormPages'
 import { SnippetListPage } from '../pages/SnippetListPage'
 import { SnippetDetailPage } from '../pages/SnippetDetailPage'
 import { SnippetCreatePage, SnippetEditPage } from '../pages/SnippetFormPages'
+import { SearchPage } from '../pages/SearchPage'
 import { AppShell } from '../widgets/AppShell'
 import { ProtectedRoute } from './ProtectedRoute'
 
@@ -30,6 +31,7 @@ export const router = createBrowserRouter([
       { path: 'nodes/:id/edit', element: <NodeEditPage /> },
       // React Flow는 크다. Graph 화면에 들어갈 때만 내려받는다(§16.3).
       { path: 'graph', lazy: async () => ({ Component: (await import('../pages/GraphPage')).GraphPage }) },
+      { path: 'search', element: <SearchPage /> },
       { path: 'snippets', element: <SnippetListPage /> },
       { path: 'snippets/new', element: <SnippetCreatePage /> },
       { path: 'snippets/:id', element: <SnippetDetailPage /> },
