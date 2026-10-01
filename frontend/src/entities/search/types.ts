@@ -6,7 +6,7 @@ export interface Segment {
   matched: boolean
 }
 
-export type MatchedField = 'title' | 'tag' | 'language' | 'body' | 'code'
+export type MatchedField = 'title' | 'tag' | 'language' | 'body' | 'code' | 'error'
 
 export interface SearchHit {
   id: string
@@ -15,7 +15,7 @@ export interface SearchHit {
   status: NodeStatus
   score: number
   matchedFields: MatchedField[]
-  highlight: { title?: Segment[]; summary?: Segment[]; body?: Segment[]; code?: Segment[] }
+  highlight: { title?: Segment[]; summary?: Segment[]; body?: Segment[]; code?: Segment[]; error?: Segment[] }
   language: string | null
   framework: string | null
   favorite: boolean

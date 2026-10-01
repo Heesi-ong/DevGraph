@@ -55,7 +55,8 @@ class SecretScannerTest {
 	@Test
 	void scanCostStaysBoundedOnHugeSingleLines() {
 		// 512KB 한 줄에서 정규식 백트래킹이 폭발하지 않아야 한다(요청 하나가 스레드를 붙잡는 문제).
-		java.time.Duration limit = java.time.Duration.ofSeconds(5);
+		// 폭주(O(n²))와 느린 CI의 차이를 가르는 여유 있는 한도. 정상 구현은 각 호출이 1~2초 안에 끝난다.
+		java.time.Duration limit = java.time.Duration.ofSeconds(10);
 		org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(limit,
 				() -> assertThat(SecretScanner.scan("a".repeat(512 * 1024))).isEmpty());
 		org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(limit,

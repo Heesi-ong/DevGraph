@@ -141,6 +141,11 @@ public class SearchService {
 				highlight.put("body", Highlighter.segments(excerpts.body(), terms, excerpts.bodyStart() > 1,
 						excerpts.bodyStart() - 1 + length(excerpts.body()) < excerpts.bodyTotal()));
 			}
+			if (row.errorHit()) {
+				matched.add("error");
+				highlight.put("error", Highlighter.segments(excerpts.error(), terms, excerpts.errorStart() > 1,
+						excerpts.errorStart() - 1 + length(excerpts.error()) < excerpts.errorTotal()));
+			}
 			if (row.codeHit()) {
 				matched.add("code");
 				highlight.put("code", Highlighter.segments(excerpts.code(), terms, excerpts.codeStart() > 1,

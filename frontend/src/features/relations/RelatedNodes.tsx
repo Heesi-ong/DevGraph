@@ -92,11 +92,14 @@ export function RelatedNodes({
   nodeType,
   relations,
   editable,
+  showPicker = true,
 }: {
   nodeId: string
   nodeType: AnyNodeType
   relations: NodeRelations
   editable: boolean
+  // 체인 빌더가 같은 화면에서 연결 UI를 맡는 경우(Error/Solution 상세) 일반 Picker는 숨긴다.
+  showPicker?: boolean
 }) {
   const [error, setError] = useState<string | null>(null)
   const types = useQuery({ queryKey: relationKeys.types, queryFn: listRelationTypes, staleTime: Infinity })
@@ -134,7 +137,7 @@ export function RelatedNodes({
           {error}
         </p>
       )}
-      {editable && <RelationPicker nodeId={nodeId} nodeType={nodeType} />}
+      {editable && showPicker && <RelationPicker nodeId={nodeId} nodeType={nodeType} />}
     </section>
   )
 }

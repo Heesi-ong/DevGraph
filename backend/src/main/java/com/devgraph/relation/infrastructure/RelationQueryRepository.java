@@ -67,6 +67,29 @@ public class RelationQueryRepository {
 				(String) r[11], (NodeType) r[12], (NodeStatus) r[13])).toList();
 	}
 
+	/**
+	 * 주어진 Node들에서 특정 관계 key로 나가는(outgoing) 또는 들어오는 edge 수. 휴지통 Node와 이어진 것은 제외한다.
+	 * Problems 목록의 체인 미리보기(해결 수, 프로젝트 수)에 쓴다.
+	 */
+	public java.util.Map<UUID, Long> countLinks(UUID workspaceId, Collection<UUID> nodeIds, String typeKey,
+			boolean outgoing) {
+		if (nodeIds.isEmpty()) {
+			return java.util.Map.of();
+		}
+		String self = outgoing ? "r.sourceNodeId" : "r.targetNodeId";
+		String other = outgoing ? "r.targetNodeId" : "r.sourceNodeId";
+		@SuppressWarnings("unchecked")
+		List<Object[]> rows = entityManager.createQuery("select " + self + ", count(r) from RelationJpaEntity r, "
+				+ "RelationTypeJpaEntity t, KnowledgeNodeJpaEntity o where r.relationTypeId = t.id and t.key = :key "
+				+ "and r.workspaceId = :ws and o.workspaceId = :ws and o.id = " + other + " and o.status <> :trashed "
+				+ "and " + self + " in :ids group by " + self)
+				.setParameter("key", typeKey).setParameter("ws", workspaceId).setParameter("ids", nodeIds)
+				.setParameter("trashed", NodeStatus.TRASHED).getResultList();
+		java.util.Map<UUID, Long> counts = new java.util.HashMap<>();
+		rows.forEach(r -> counts.put((UUID) r[0], (Long) r[1]));
+		return counts;
+	}
+
 	public enum Side { OUTGOING, INCOMING }
 
 	/**

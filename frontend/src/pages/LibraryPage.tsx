@@ -2,16 +2,19 @@ import { useInfiniteQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { listNodes } from '../entities/knowledge-node/api'
 import { nodeKeys } from '../entities/knowledge-node/queryKeys'
-import type { NodeFilters, NodeStatus, NodeType } from '../entities/knowledge-node/types'
+import type { AnyNodeType, NodeFilters, NodeStatus } from '../entities/knowledge-node/types'
 import { EmptyState, ErrorState, LoadingState } from '../shared/ui/StateViews'
 import { NodeList } from '../widgets/NodeList'
+
+// Library(§8): Concepts, Notes, Errors, Solutions, Resources. Snippet과 Project는 각자의 화면이 있다.
+const LIBRARY_TYPES: AnyNodeType[] = ['CONCEPT', 'NOTE', 'ERROR', 'SOLUTION', 'RESOURCE']
 
 // 필터는 URL search params가 유일한 상태다(§16). 새로고침·공유 링크에서도 같은 목록이 나온다.
 function readFilters(params: URLSearchParams): NodeFilters {
   const type = params.get('type')
   const status = params.get('status')
   return {
-    type: type === 'CONCEPT' || type === 'NOTE' ? (type as NodeType) : undefined,
+    type: LIBRARY_TYPES.includes(type as AnyNodeType) ? (type as AnyNodeType) : undefined,
     status: status === 'ARCHIVED' || status === 'TRASHED' ? (status as NodeStatus) : undefined,
     tagId: params.get('tagId') || undefined,
     favorite: params.get('favorite') === 'true' ? true : undefined,
@@ -49,6 +52,9 @@ export function LibraryPage() {
           <option value="">모든 유형</option>
           <option value="CONCEPT">Concept</option>
           <option value="NOTE">Note</option>
+          <option value="ERROR">Error</option>
+          <option value="SOLUTION">Solution</option>
+          <option value="RESOURCE">Resource</option>
         </select>
         <select value={filters.status ?? ''} onChange={(e) => setParam('status', e.target.value)} aria-label="상태">
           <option value="">활성</option>

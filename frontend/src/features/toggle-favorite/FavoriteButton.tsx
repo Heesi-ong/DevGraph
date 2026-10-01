@@ -1,18 +1,13 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { setFavorite } from '../../entities/knowledge-node/api'
-import { nodeKeys } from '../../entities/knowledge-node/queryKeys'
-import { snippetKeys } from '../../entities/snippet/queryKeys'
+import { useInvalidateRelationViews } from '../relations/useInvalidateRelationViews'
 
 // 설계서 §9.2 KNOW-07. 즐겨찾기는 사용자별 상태라 Node 자체(version)를 바꾸지 않는다.
 export function FavoriteButton({ nodeId, favorite }: { nodeId: string; favorite: boolean }) {
-  const queryClient = useQueryClient()
+  const invalidate = useInvalidateRelationViews()
   const toggle = useMutation({
     mutationFn: () => setFavorite(nodeId, !favorite),
-    onSuccess: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: nodeKeys.all }),
-        queryClient.invalidateQueries({ queryKey: snippetKeys.all }),
-      ]),
+    onSuccess: () => invalidate(),
   })
 
   return (

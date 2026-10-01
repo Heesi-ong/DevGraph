@@ -1,8 +1,11 @@
 import { Link } from 'react-router-dom'
-import type { NodeSummary } from '../entities/knowledge-node/types'
+import type { AnyNodeType, NodeSummary } from '../entities/knowledge-node/types'
+import { nodePath } from '../entities/relation/paths'
 import { FavoriteButton } from '../features/toggle-favorite/FavoriteButton'
 
-const TYPE_LABEL = { CONCEPT: 'Concept', NOTE: 'Note' } as const
+const TYPE_LABEL: Record<AnyNodeType, string> = {
+  CONCEPT: 'Concept', NOTE: 'Note', SNIPPET: 'Snippet', ERROR: 'Error', SOLUTION: 'Solution', RESOURCE: 'Resource', PROJECT: 'Project',
+}
 
 export function NodeList({ nodes }: { nodes: NodeSummary[] }) {
   return (
@@ -11,7 +14,7 @@ export function NodeList({ nodes }: { nodes: NodeSummary[] }) {
         <li key={node.id} className="node-card">
           <div className="row">
             <span className="badge">{TYPE_LABEL[node.type]}</span>
-            <Link to={`/nodes/${node.id}`} className="node-title">
+            <Link to={nodePath(node.type, node.id)} className="node-title">
               {node.title}
             </Link>
             <FavoriteButton nodeId={node.id} favorite={node.favorite} />

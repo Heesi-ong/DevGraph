@@ -11,7 +11,7 @@ import { relationKeys } from '../entities/relation/queryKeys'
 import { GraphCanvas } from '../features/graph-view/GraphCanvas'
 import { EmptyState, ErrorState, LoadingState } from '../shared/ui/StateViews'
 
-const FILTERABLE_TYPES: AnyNodeType[] = ['CONCEPT', 'NOTE', 'SNIPPET']
+const FILTERABLE_TYPES: AnyNodeType[] = ['CONCEPT', 'NOTE', 'SNIPPET', 'ERROR', 'SOLUTION', 'PROJECT', 'RESOURCE']
 const TRUNCATION_TEXT: Record<string, string> = {
   MAX_NODES: '항목이 많아 일부만 표시합니다.',
   MAX_EDGES: '관계가 많아 일부만 표시합니다.',

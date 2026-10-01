@@ -17,8 +17,16 @@ function useDebounced<T>(value: T, ms: number) {
 }
 
 // 설계서 §9.4 REL-01, §19 Relation Picker. 타입과 방향을 고르면 서버가 그 조합이 허용하는 미연결 Node만 후보로 준다.
-export function RelationPicker({ nodeId, nodeType }: { nodeId: string; nodeType: AnyNodeType }) {
-  const [side, setSide] = useState<Side>('OUTGOING')
+interface Props {
+  nodeId: string
+  nodeType: AnyNodeType
+  // 체인 빌더용: 관계 타입과 방향을 고정하고 대상만 고르게 한다.
+  presetTypeKey?: string
+  presetSide?: Side
+}
+
+export function RelationPicker({ nodeId, nodeType, presetTypeKey, presetSide }: Props) {
+  const [side, setSide] = useState<Side>(presetSide ?? 'OUTGOING')
   const [typeId, setTypeId] = useState('')
   const [q, setQ] = useState('')
   const [note, setNote] = useState('')
@@ -31,7 +39,8 @@ export function RelationPicker({ nodeId, nodeType }: { nodeId: string; nodeType:
   const usable = (types.data ?? []).filter((t) =>
     (side === 'OUTGOING' ? t.allowedSourceTypes : t.allowedTargetTypes).includes(nodeType),
   )
-  const selected = usable.find((t) => t.id === typeId) ?? usable[0]
+  const presetId = presetTypeKey ? types.data?.find((t) => t.key === presetTypeKey)?.id : undefined
+  const selected = usable.find((t) => t.id === (typeId || presetId)) ?? usable[0]
 
   const candidates = useQuery({
     queryKey: relationKeys.candidates(nodeId, selected?.id ?? '', side, debouncedQ),
@@ -63,8 +72,8 @@ export function RelationPicker({ nodeId, nodeType }: { nodeId: string; nodeType:
 
   return (
     <section aria-label="관계 추가" className="relation-picker">
-      <h3>관계 추가</h3>
-      <div className="row">
+      {!presetTypeKey && <h3>관계 추가</h3>}
+      <div className="row" hidden={!!presetTypeKey}>
         <label>
           방향
           <select value={side} onChange={(e) => setSide(e.target.value as Side)}>

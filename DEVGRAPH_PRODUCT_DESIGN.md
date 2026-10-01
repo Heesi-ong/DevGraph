@@ -1,6 +1,6 @@
 # DevGraph 제품·서비스·기술 설계서
 
-> 문서 상태: 기준안 v1.8 (Phase 0~5 구현 결과 반영)  
+> 문서 상태: 기준안 v1.9 (Phase 0~6 구현 결과 반영)  
 > 작성일: 2026-09-28  
 > 대상: Product, UX, Frontend, Backend, QA, 운영 담당 및 구현 에이전트  
 > 문서 목적: 별도 구두 설명 없이 MVP와 1.0 구현을 시작할 수 있는 Source of Truth
@@ -12,6 +12,8 @@
 > **v1.3 변경 요약:** 재인증 저장 모델을 `auth_session_families`(안정 세션 식별자) + `auth_sessions`(rotation 이력) + `reauth_tokens`(family당 1개, purpose 4종)로 확정하고 Access JWT `sid = token_family_id`, family 절대 만료(`absolute_expires_at`, 기본 90일)를 도입(§12.1, §12.3, §17.2), `GET/DELETE /auth/sessions`를 family 기준 API로 재설계(§14.2), Relation 의미 계약을 확정 — 시스템 13종 닫힌 집합 유지, 사용자 정의 Relation을 1.0에서 Growth로 이동(§9.4, §13.2, §18.1, §25, §9.9), Self-loop를 애플리케이션 사전검증(400) + DB CHECK(최종 방어) 이중 구조로 확정하고 `relation_types.allow_self_loop` 같은 예외 컬럼은 추가하지 않기로 결정(PostgreSQL CHECK의 교차 테이블 조회 불가 제약, §12.3), `APPLIED_IN` Source를 Solution 전용으로 정정해 §9.7 체인과의 기존 불일치를 제거, 모든 DB constraint에 명시적 이름 규칙을 도입하고 SQLState+이름 기반 예외 변환을 infrastructure 계층 책임으로 명시(§12.2, §15.2)했다.
 >
 > **v1.4 변경 요약:** Node 영구 삭제 cascade에 누락됐던 `node_views`/`layout_positions`를 추가하고 API의 `HAS_DEPENDENCIES`를 제거해 `TRASHED` 전제조건 + `409 INVALID_NODE_STATE`로 통일(§11.3, §14.3), 계정 탈퇴에 `POST /account/deletion-cancel`과 `DELETION_PENDING` 상태를 추가(§9.1, §14.2), `must_change_password`(§17.8 강제 비밀번호 재설정)와 `DELETION_PENDING`을 Access JWT `restriction` claim 기반의 단일 화이트리스트 필터로 통합(§17.2.3 신설), `users.must_change_password`/`status`, `auth_session_families.device_label` 컬럼 추가와 `revoke_reason`에서 중복이던 `ACCOUNT_DELETED`를 `ACCOUNT_DELETION_REQUESTED`로 단일화(§12.3), 회원가입에서 실사용 계획이 없는 `termsVersion`을 제거(§9.1, §14.2), `POST/GET /relation-types`를 실제 구현 범위(GET은 시스템 13종만, POST는 Growth로 라우트 자체를 만들지 않음)에 맞게 정정(§14.5), reauth 토큰 소비를 조건부 `UPDATE ... RETURNING` 기반 원자적 단일 소비로 명시(§17.2.2), 검색 `search_vector`에서 태그를 제외하고 join 기반 스코어링으로 전환해 벡터 갱신 시점 미결 문제를 제거(§15.4)했다. 세부 근거는 각 절 하단의 결정 사유를 참고한다.
+>
+> **v1.9 변경 요약:** Phase 6(Project / Error / Solution, 그리고 Resource) 구현 결과를 반영했다. 서브타입 4종의 API 계약·검증·상태 전이(Error 해결 상태 머신, 미해결 경고)·체인 원자성(Solution 생성과 `SOLVED_BY`를 한 트랜잭션)·Resource URL 정규화와 중복 경고·Project 그래프를 §14.6에, 검색 범위 확장(Error 메시지·Solution 본문·Project 설명)과 가중치를 §9.5·§15.4에, 구현 결과와 이월 항목을 §19에 기록했다.
 >
 > **v1.8 변경 요약:** Phase 5(Search) 구현 결과를 반영했다. `GET /search`의 실제 계약(검증, 필터, cursor, 구조화 highlight, 0건 fallback)을 §14.6에, 랭킹 가중치 조정(**정확 제목 일치 100 → 300**, 제목 부분 일치 +35 추가)과 한국어 본문 검색의 한계, 본문 색인 범위(앞 100,000자)를 §9.5·§15.4에, 구현 결과와 이월 항목을 §19에 기록했다.
 >
@@ -1139,6 +1141,17 @@ _(검색의 구현 계약은 이 표 아래 "Phase 5 구현 범위" 참고)_
 
 Export는 §9.8/§12.3에서 확정한 대로 항상 `export_jobs`를 거치는 비동기 방식 하나만 사용한다(동기 streaming 대안은 두지 않는다). `downloadUrl`은 `download_token_hash`로 검증되는 일회성 URL이며 15분 후 만료된다.
 
+**Phase 6 구현 범위와 세부 계약(v1.9 확정)**
+
+- **공통:** Error/Solution/Project/Resource는 `knowledge_nodes`의 1:1 subtype이다(V9). 제목·요약·태그·상태·즐겨찾기는 Node 공통 로직을 쓰며 **보관·휴지통·즐겨찾기는 `/nodes/{id}/...` 공통 endpoint**다. 각 타입의 `PATCH`는 `version`(낙관적 락)을 요구하고, `null`/생략은 변경 없음, 선택 텍스트의 빈 문자열은 지움이며, 바뀐 것이 없으면 `version`을 올리지 않는다. Node 공통 `PATCH /nodes/{id}`로 subtype 데이터를 바꾸려 하면 `400 USE_SUBTYPE_API`, `POST /nodes`로 만들려 하면 `400 UNSUPPORTED_TYPE`이다. 다른 타입의 id를 열면 `404`, 다른 Workspace의 id도 `404`다. 목록은 `status`(Node 보관 상태, 기본 `ACTIVE`)와 cursor를 `GET /nodes`와 같은 규약으로 쓴다. **Library(`GET /nodes`)는 Concept·Note·Error·Solution·Resource를 보여 주고 Snippet과 Project는 제외한다**(각자의 작업 공간).
+- **Error (`/errors`):** `errorMessage`(필수, 최대 100,000바이트 — 스택 트레이스 용도), `environment`(≤500), `reproductionStepsMd`·`causeHypothesisMd`(각 ≤100,000바이트), `occurredAt`(생략하면 지금). 크기 초과는 `413 PAYLOAD_TOO_LARGE`, 공백뿐인 메시지·NUL 문자는 `400`. 응답은 `{공통 Node 필드, error{…resolutionStatus, occurredAt, resolvedAt}, relations, warnings[]}`. 목록 필터 `resolution`(콤마 목록), `projectId`(`OCCURRED_IN`), `tagId`이며 항목마다 체인 미리보기 `solutionCount`·`projectCount`와 메시지 앞 200자를 준다.
+- **Error 상태 전환 (`PATCH /errors/{id}/status {version, status, resolvedAt?}`):** 허용 전이는 `OPEN → INVESTIGATING|RESOLVED|WONT_FIX`, `INVESTIGATING → OPEN|RESOLVED|WONT_FIX`, `RESOLVED|WONT_FIX → OPEN`(재오픈)뿐이다. 종료 상태끼리는 바로 오갈 수 없으며 `409 INVALID_STATUS_TRANSITION`. 같은 상태로의 요청은 아무것도 바꾸지 않는다. `resolvedAt`은 `RESOLVED`일 때만 의미가 있고(다른 상태에서는 무시·`null`로 정리, DB CHECK `ck_error_records__resolved_at`이 같은 불변식을 강제) 생략하면 지금이며 발생 시각보다 이르면 `400 BEFORE_OCCURRED_AT`. 휴지통 Error는 `409 INVALID_NODE_STATE`. **`RESOLVED`로 바꿀 때 Solution(`SOLVED_BY` 나가는 관계)이 없으면 저장은 하되 응답과 이후 조회에 `warnings:["NO_SOLUTION_LINKED"]`를 싣는다**(§9.7 — 막지 않는다).
+- **Solution (`/solutions`):** `approachMd`(필수), `stepsMd`·`verificationMd`·`tradeoffsMd`(선택), `resolvedAt`(선택). **`errorNodeId`를 주면 Solution과 `Error --SOLVED_BY--> Solution`을 한 트랜잭션으로 만든다** — Error가 아니면(`400 TYPE_NOT_ALLOWED`)·다른 Workspace면(`400 INVALID_RELATION_NODE`) Solution도 만들어지지 않는다(통합 테스트가 행 수로 확인). 설계 초안의 `errorRelation` 필드명 대신 `errorNodeId`를 쓴다. 목록 필터 `errorId`(그 Error를 해결하는 것), `projectId`(`APPLIED_IN`)이고 항목마다 `errorCount`·`snippetCount`·`projectCount`를 준다.
+- **Project (`/projects`):** `description`은 Node의 `bodyMd`(Markdown), `projectStatus`(`ACTIVE|PAUSED|COMPLETED|ARCHIVED`, 기본 `ACTIVE` — Node의 보관 상태와는 별개의 업무 상태이며 목록에서 숨기는 보관은 Node archive), `repositoryUrl`(http/https만, 계정 정보가 든 URL 거부, ≤500), `startedOn`·`endedOn`(`endedOn ≥ startedOn`, 수정 시 기존 값과의 조합으로도 검사). 수정에서 날짜를 지우려면 `clearStartedOn`/`clearEndedOn: true`(생략과 구분하기 위해). 연결은 junction이 아니라 Relation이고(PROJ-03), 목록은 `problemCount`(들어오는 `OCCURRED_IN`)·`knowledgeCount`(`USED_IN`)·`solutionCount`(`APPLIED_IN`)를 준다. **`GET /projects/{id}/graph`**는 그 Project를 중심으로 한 focus 그래프(기본 depth 2, §13.3의 상한·잘림 규칙 그대로)이며 Project가 아닌 id는 `404`.
+- **Resource (`/resources`):** `url`(필수, http/https 절대 URL만; `javascript:`·`data:`·`file:`·`ftp:`·scheme 없음·host 없음·계정 정보(`user:pass@`)·2,000자 초과는 `400 INVALID_URL`, DB CHECK `ck_resources__url_scheme`가 최종 방어), `kind`(`WEB|DOC|VIDEO|REPO|BOOK|OTHER`, 기본 `WEB`), `siteName`(생략하면 host). 원문 URL은 입력 그대로 보관하고 `url_normalized`(§12.3 규칙 5가지; 경로·쿼리 값은 디코딩하지 않음)로 중복을 찾는다. **같은 정규화 URL의 다른 Resource(휴지통·다른 Workspace 제외)가 있으면 응답에 `duplicates:[{id,title}]`로 경고만 하고 저장은 막지 않는다.** 서버는 URL 내용을 가져오지 않는다(§17.4).
+- **관계 규칙(§13.1.1)은 그대로 적용된다.** 권장 체인 7개 edge가 허용 방향으로만 만들어지고(`Snippet --APPLIED_IN--> Project`, `Error --USED_IN--> Project` 등 설계가 막은 조합은 `TYPE_NOT_ALLOWED`), 휴지통 Solution은 Error 목록의 `solutionCount`에서 빠진다.
+- **제외/이월:** Project 상태(`ARCHIVED`)와 Node 보관의 통합 정리, `GET /graph/workspace`의 Project scope 필터(GRPH-04 — Project 그래프는 전용 endpoint로 대신), Resource 메타데이터 자동 수집(`last_checked_at`은 항상 `null`), Error/Solution/Project의 타입 변경(KNOW-09), 영구 삭제(Phase 7 재인증 의존).
+
 **Phase 5 구현 범위와 세부 계약(v1.8 확정)**
 
 - **`GET /search?q&types&tagId&language&framework&archived&cursor&size`:** 휴지통은 항상 제외, `archived=true`일 때만 보관 항목 포함, 기본 `size` 20(최대 100). 대상은 현재 구현된 Concept/Note/Snippet이며 다른 타입은 해당 Phase에서 `title/summary/body`가 같은 규칙으로 검색된다.
@@ -1299,6 +1312,7 @@ knowledge/
 - `knowledge_nodes.search_vector`는 title(A), summary/body(C)만 가중한 tsvector를 저장한다. **태그는 여기 포함하지 않는다.**
 - 태그 일치는 `node_tags + tags` 조인으로 별도 계산한다(exact match면 §9.5의 고정 `+60`). tag 이름이 바뀌어도 `search_vector`를 다시 만들 필요가 없다 — "서비스 트랜잭션에서 갱신할지 조회 시 합산할지" 미결이었던 문제를 애초에 없앤다.
 - Snippet code는 자연어 FTS와 성격이 달라 trigram 또는 normalized token 검색을 별도로 합친다.
+- **Phase 6 검색 확장(v1.9):** `error_records`(메시지 B, 환경·재현·원인 C)와 `solution_records`(접근 B, 단계·검증·트레이드오프 C)에 같은 방식의 생성 `search_vector`와 GIN 인덱스를 두고, 검색 후보·`body` 점수에 합산한다. Error 메시지는 trigram(`ix_error_records__message_trgm`) 부분 일치로도 찾아(예외 이름 일부 `NullPointer`) 일치 필드 `error`와 `highlight.error`를 준다(가중치 `ERROR_MESSAGE=40`, 코드와 같은 비중). Project 설명은 Node 본문이라 기존 `search_vector`에 들어간다. 발췌 원천은 Node 본문에 subtype 서술 필드를 이어 붙인 텍스트다. Resource의 URL 자체는 검색 대상이 아니다.
 - **색인 범위와 FTS 설정(v1.8):** `search_vector`는 `'simple'` 설정(형태소 분석 없음, 소문자 + 공백·구두점 분리)의 생성 컬럼이다. tsvector는 값 하나가 1 MB를 넘으면 오류이므로 본문은 **앞 100,000자만** 색인한다(그 뒤 내용은 FTS 대상이 아니며, 1 MB 본문 저장이 실패하지 않는지와 뒤쪽 토큰이 검색되지 않는지를 테스트로 확인했다). 제목은 `lower(title)` trigram GIN, 코드는 `snippet_versions.code` trigram GIN(V6)으로 부분 일치를 한다.
 - **한국어 한계(v1.8 확인):** 본문은 공백으로 나뉜 토큰 단위로만 일치한다. 조사가 붙은 본문(`만료시간을`)은 그 형태 그대로 검색해야 맞고 `만료시간`으로는 찾지 못한다. 제목은 trigram이라 부분 일치(`격리` → `Transaction 격리 수준`)가 된다. 본문 부분 일치가 필요하면 본문 trigram 인덱스(크기 부담)나 PGroonga/OpenSearch를 검토한다 — 통합 테스트가 이 한계를 명시적으로 고정해 둔다.
 - **인덱스 활용:** 단일 SQL은 후보 조건이 `OR`로 이어져 여러 테이블(코드는 `snippet_versions`)에 걸쳐 있어 전체 후보에 대해 인덱스 하나로 푸시다운되지 않는다. Workspace 범위 개인 KB(수만 건)에서는 허용하는 단순화이며, 각 조건이 인덱스 가능한 형태인지는 쿼리 플랜 테스트로 확인했다. 느려지면 조건별 `UNION ALL`로 나눈다.
@@ -1685,6 +1699,9 @@ Phase 0~5는 기반(인증→저장→코드→관계→검색) 순서로 아래
 - DB: error_records, solution_records, projects, resources.
 - 테스트: status transition, subtype invariant, full completion workflow E2E.
 - 완료 조건: 문서 28절의 전체 Workflow를 seed 없이 신규 사용자 계정에서 수행한다.
+- **구현 결과(v1.9):** 범위를 구현했고 통과한다. 백엔드 통합 테스트 16개(Error 생애주기·낙관적 락·공통 endpoint, 검증(크기·NUL·공백), **상태 머신 전 경로와 미해결 경고**, `resolvedAt` 규칙, 휴지통·다른 Workspace 거부, **Solution+관계 원자성**, 필터·체인 개수, Project 검증(기간·위험 URL·날짜 지우기)·목록·그래프, Resource URL 검증·정규화·중복 경고·Workspace 격리, 체인 관계의 허용/금지 방향, Library 범위, 서브타입 정합성 SQL과 DB CHECK, **§27.1 전체 workflow의 API 버전**, 새 서브타입 검색)와 `UrlNormalizer` 단위 테스트 6개, Playwright E2E 5개 — **신규 계정으로 화면만 따라 §27.1의 1~13단계를 수행하는 시나리오**(가입 → Concept·관계 → Snippet → Error → 원인 연결 → Solution(생성과 동시에 해결 연결) → 구현 Snippet → Project 연결 → Project 탭·그래프(방향·inverse label) → 해결됨(경고 없음) → 전역 검색으로 Error·코드 symbol → 복사·사용 횟수)와 상태 경고, Problems 필터·체인 미리보기·대시보드, Resource 위험 URL·중복·외부 링크 속성, Project 폼 검증.
+- **구현·검증 중 발견해 수정한 결함:** ① `ProjectController`의 `boolean clearStartedOn/clearEndedOn`(기본형)이 JSON에서 생략되면 요청 전체가 `400`이 되던 것(래퍼 타입으로 변경), ② `SecretScanner`의 접속 문자열 정규식이 수량자에 상한이 없어 병적 입력(`a://` 반복)에서 스캔이 수 초 걸리던 것(상한을 둬 약 7.7초 → 0.5초). 테스트 쪽 결함(모호한 로케이터, 잘못된 version 가정)도 고쳤다.
+- **이월/미정의 항목:** ① 설계서의 "Project 상태 `ARCHIVED`"와 Node 보관의 중복(위 참고). ② Error/Solution/Project/Resource의 영구 삭제·타입 변경. ③ Project scope 필터(`/graph/workspace`)와 Project 목록의 Export. ④ 한 화면에서 Solution의 구현 Snippet까지 이어 보여 주는 "체인 미리보기"는 목록에서 개수만 보여 준다. ⑤ Export 단계(§27.1의 14번)는 Phase 7. ⑥ 이 테스트들은 신규 계정 흐름을 검증하지만, 사용자가 겪는 실제 소요 시간·막히는 지점은 사용자 테스트로 확인해야 한다(§5.2 지표).
 
 ### Phase 7 — 서비스 안정화
 

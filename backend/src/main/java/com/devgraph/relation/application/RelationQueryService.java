@@ -50,6 +50,13 @@ public class RelationQueryService {
 				.toList();
 	}
 
+	/** 목록의 체인 미리보기용 관계 수(§19 Problems). `outgoing=false`면 들어오는 edge. */
+	@Transactional(readOnly = true)
+	public java.util.Map<UUID, Long> countLinks(UUID workspaceId, java.util.Collection<UUID> nodeIds, String typeKey,
+			boolean outgoing) {
+		return queryRepository.countLinks(workspaceId, nodeIds, typeKey, outgoing);
+	}
+
 	/**
 	 * 호출자(knowledge)가 이미 Workspace 범위로 검증한 Node의 관계. 대칭 타입은 저장 방향과 무관하게 `outgoing`에
 	 * 담고, 방향성 타입은 이 Node가 source면 outgoing(forward label), target이면 incoming(inverse label)이다.

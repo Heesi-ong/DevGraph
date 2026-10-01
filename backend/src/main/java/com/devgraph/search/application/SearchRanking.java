@@ -18,6 +18,8 @@ public final class SearchRanking {
 	public static final double LANGUAGE_FRAMEWORK = 45;
 	public static final double CODE = 40; // × similarity(부분 문자열 일치는 1.0)
 	public static final double BODY_FTS = 25; // × normalized_rank
+	// Error 메시지의 부분 일치(예외 이름 일부로도 찾는다). 코드 일치와 같은 비중이다.
+	public static final double ERROR_MESSAGE = 40;
 	public static final double FAVORITE = 5;
 	public static final double RECENCY_MAX = 5;
 	public static final int RECENCY_DAYS = 30;

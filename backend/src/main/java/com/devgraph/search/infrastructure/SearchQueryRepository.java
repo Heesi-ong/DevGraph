@@ -55,12 +55,12 @@ public class SearchQueryRepository {
 
 	public record Row(UUID id, String type, String title, String status, Instant updatedAt, String language,
 			String framework, boolean favorite, long scoreKey, boolean titleHit, boolean tagHit, boolean languageHit,
-			boolean bodyHit, boolean codeHit) {
+			boolean bodyHit, boolean codeHit, boolean errorHit) {
 	}
 
 	/** 발췌(본문·코드는 전체가 아니라 검색어 주변만 가져온다). `*Start`는 1부터, `*Total`은 원문 길이(문자). */
 	public record Excerpts(String summary, String body, int bodyStart, int bodyTotal, String code, int codeStart,
-			int codeTotal) {
+			int codeTotal, String error, int errorStart, int errorTotal) {
 	}
 
 	public record RecentRow(UUID id, String type, String title, Instant updatedAt) {
@@ -97,7 +97,7 @@ public class SearchQueryRepository {
 				rs.getString("title"), rs.getString("status"), instant(rs.getObject("updated_at", OffsetDateTime.class)),
 				rs.getString("language"), rs.getString("framework"), rs.getBoolean("favorite"), rs.getLong("score_key"),
 				rs.getBoolean("title_hit"), rs.getBoolean("tag_hit"), rs.getBoolean("lang_hit"),
-				rs.getBoolean("body_hit"), rs.getBoolean("code_hit")));
+				rs.getBoolean("body_hit"), rs.getBoolean("code_hit"), rs.getBoolean("error_hit")));
 	}
 
 	public int count(Criteria c) {
@@ -118,7 +118,7 @@ public class SearchQueryRepository {
 		return jdbc.query(sql, params, (rs, i) -> new Row(rs.getObject("id", UUID.class), rs.getString("node_type"),
 				rs.getString("title"), rs.getString("status"), instant(rs.getObject("updated_at", OffsetDateTime.class)),
 				rs.getString("language"), rs.getString("framework"), rs.getBoolean("favorite"), rs.getLong("score_key"),
-				true, false, false, false, false));
+				true, false, false, false, false, false));
 	}
 
 	public List<RecentRow> recent(UUID workspaceId, int limit) {
@@ -136,29 +136,38 @@ public class SearchQueryRepository {
 		if (ids.isEmpty()) {
 			return Map.of();
 		}
-		String body = "left(n.body_md, " + BODY_INDEXED_CHARS + ")";
+		// 본문 발췌 원천: Node 본문에 Solution/Error의 서술 필드를 이어 붙인다(subtype 서술도 "본문"으로 검색되므로).
+		String body = "left(concat_ws(E'\\n', n.body_md, sr.approach_md, sr.steps_md, sr.verification_md, sr.tradeoffs_md, "
+				+ "er.environment, er.reproduction_steps_md, er.cause_hypothesis_md), " + BODY_INDEXED_CHARS + ")";
 		String sql = """
 				SELECT n.id, n.summary,
 				  %1$s AS body_pos, substr(%2$s, greatest(1, %1$s - %3$d), %4$d) AS body_win, left(%2$s, %4$d) AS body_head,
 				  length(%2$s) AS body_total,
 				  %5$s AS code_pos, substr(v.code, greatest(1, %5$s - %3$d), %6$d) AS code_win, left(v.code, %6$d) AS code_head,
-				  length(v.code) AS code_total
+				  length(v.code) AS code_total,
+				  %7$s AS error_pos, substr(er.error_message, greatest(1, %7$s - %3$d), %6$d) AS error_win,
+				  left(er.error_message, %6$d) AS error_head, length(er.error_message) AS error_total
 				FROM knowledge_nodes n
+				LEFT JOIN error_records er ON er.node_id = n.id
+				LEFT JOIN solution_records sr ON sr.node_id = n.id
 				LEFT JOIN snippets s ON s.node_id = n.id
 				LEFT JOIN snippet_versions v ON v.snippet_node_id = s.node_id AND v.version_no = s.current_version_no
 				WHERE n.workspace_id = :ws AND n.id IN (:ids)"""
 				.formatted("strpos(lower(" + body + "), :term)", body, LEAD, BODY_WINDOW,
-						"strpos(lower(v.code), :term)", CODE_WINDOW);
+						"strpos(lower(v.code), :term)", CODE_WINDOW, "strpos(lower(er.error_message), :term)");
 		Map<UUID, Excerpts> out = new HashMap<>();
 		jdbc.query(sql, new MapSqlParameterSource("ws", workspaceId).addValue("ids", ids).addValue("term", firstTerm),
 				rs -> {
 					int bodyPos = rs.getInt("body_pos");
 					int codePos = rs.getInt("code_pos");
+					int errorPos = rs.getInt("error_pos");
 					String bodyText = bodyPos > 0 ? rs.getString("body_win") : rs.getString("body_head");
 					String codeText = codePos > 0 ? rs.getString("code_win") : rs.getString("code_head");
+					String errorText = errorPos > 0 ? rs.getString("error_win") : rs.getString("error_head");
 					out.put(rs.getObject("id", UUID.class), new Excerpts(rs.getString("summary"), bodyText,
 							bodyPos > 0 ? Math.max(1, bodyPos - LEAD) : 1, rs.getInt("body_total"), codeText,
-							codePos > 0 ? Math.max(1, codePos - LEAD) : 1, rs.getInt("code_total")));
+							codePos > 0 ? Math.max(1, codePos - LEAD) : 1, rs.getInt("code_total"), errorText,
+							errorPos > 0 ? Math.max(1, errorPos - LEAD) : 1, rs.getInt("error_total")));
 				});
 		return out;
 	}
@@ -167,7 +176,7 @@ public class SearchQueryRepository {
 
 	/** 후보 선정 조건: 제목 부분 일치 · FTS · 태그 exact · 언어/framework · 코드 부분 일치 중 하나. */
 	private static String matchCondition() {
-		return "(h.title_contains OR n.search_vector @@ q.tsq OR h.tag_hit OR h.lang_hit OR h.code_hit)";
+		return "(h.title_contains OR h.fts_hit OR h.tag_hit OR h.lang_hit OR h.code_hit OR h.error_hit)";
 	}
 
 	private static String scored(Criteria c, String matchCondition) {
@@ -190,18 +199,19 @@ public class SearchQueryRepository {
 				+ %s * title_rank
 				+ CASE WHEN lang_hit THEN %s ELSE 0 END
 				+ CASE WHEN code_hit THEN %s ELSE 0 END
+				+ CASE WHEN error_hit THEN %s ELSE 0 END
 				+ %s * body_rank
 				+ CASE WHEN favorite THEN %s ELSE 0 END
 				+ %s * greatest(0, 1 - floor(extract(epoch from (now() - updated_at)) / 86400) / %d)""",
 				SearchRanking.EXACT_TITLE, SearchRanking.TITLE_PREFIX, SearchRanking.TITLE_CONTAINS,
 				SearchRanking.EXACT_TAG, SearchRanking.TITLE_FTS, SearchRanking.LANGUAGE_FRAMEWORK, SearchRanking.CODE,
-				SearchRanking.BODY_FTS, SearchRanking.FAVORITE, SearchRanking.RECENCY_MAX, SearchRanking.RECENCY_DAYS);
+				SearchRanking.ERROR_MESSAGE, SearchRanking.BODY_FTS, SearchRanking.FAVORITE, SearchRanking.RECENCY_MAX, SearchRanking.RECENCY_DAYS);
 		return """
 				WITH q AS (SELECT websearch_to_tsquery('simple', :q) AS tsq)
 				SELECT t.*, round((%s)::numeric * 1000000)::bigint AS score_key FROM (
 				  SELECT n.id, n.node_type, n.title, n.status, n.updated_at, s.language, s.framework,
 				         (f.node_id IS NOT NULL) AS favorite,
-				         h.title_exact, h.title_prefix, h.title_contains, h.tag_hit, h.lang_hit, h.code_hit,
+				         h.title_exact, h.title_prefix, h.title_contains, h.tag_hit, h.lang_hit, h.code_hit, h.error_hit,
 				         h.title_rank, h.body_rank,
 				         (h.title_contains OR h.title_rank > 0) AS title_hit,
 				         (h.body_rank > 0) AS body_hit
@@ -209,6 +219,8 @@ public class SearchQueryRepository {
 				  CROSS JOIN q
 				  LEFT JOIN snippets s ON s.node_id = n.id
 				  LEFT JOIN snippet_versions v ON v.snippet_node_id = s.node_id AND v.version_no = s.current_version_no
+				  LEFT JOIN error_records er ON er.node_id = n.id
+				  LEFT JOIN solution_records sr ON sr.node_id = n.id
 				  LEFT JOIN favorites f ON f.node_id = n.id AND f.user_id = :uid
 				  CROSS JOIN LATERAL (SELECT
 				      lower(n.title) = :lq AS title_exact,
@@ -218,8 +230,13 @@ public class SearchQueryRepository {
 				              WHERE nt.node_id = n.id AND tg.workspace_id = :ws AND tg.normalized_name = :tagName) AS tag_hit,
 				      coalesce(s.language = :lq OR s.framework = :lq, false) AS lang_hit,
 				      coalesce(v.code ILIKE :lcontains ESCAPE '!', false) AS code_hit,
+				      coalesce(er.error_message ILIKE :lcontains ESCAPE '!', false) AS error_hit,
+				      (n.search_vector @@ q.tsq OR coalesce(er.search_vector @@ q.tsq, false)
+				          OR coalesce(sr.search_vector @@ q.tsq, false)) AS fts_hit,
 				      ts_rank_cd('{0,0,0,1}', n.search_vector, q.tsq, 34) AS title_rank,
-				      ts_rank_cd('{0,1,0,0}', n.search_vector, q.tsq, 34) AS body_rank) h
+				      greatest(ts_rank_cd('{0,1,0,0}', n.search_vector, q.tsq, 34),
+				               coalesce(ts_rank_cd('{0,1,1,0}', er.search_vector, q.tsq, 34), 0),
+				               coalesce(ts_rank_cd('{0,1,1,0}', sr.search_vector, q.tsq, 34), 0)) AS body_rank) h
 				  WHERE n.workspace_id = :ws AND n.status IN (:statuses)%s AND %s
 				) t""".formatted(score, filters, matchCondition);
 	}

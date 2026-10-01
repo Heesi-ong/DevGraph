@@ -83,6 +83,17 @@ public class RelationService {
 		return view(saved, type);
 	}
 
+	/**
+	 * 시스템 관계 타입을 key로 지정해 만든다(다른 모듈이 같은 트랜잭션 안에서 체인 edge를 함께 만들 때,
+	 * 예: Solution 생성과 `Error --SOLVED_BY--> Solution`). 실패하면 호출한 쪽 트랜잭션 전체가 되돌아간다.
+	 */
+	@Transactional
+	public RelationView createByTypeKey(UUID userId, UUID sourceId, UUID targetId, String typeKey, String note) {
+		UUID typeId = typeRepository.findSystemByKey(typeKey).orElseThrow(
+				() -> new IllegalStateException("system relation type missing: " + typeKey)).getId();
+		return create(userId, sourceId, targetId, typeId, note);
+	}
+
 	/** 타입/메모 변경. 요청에서 null인 필드는 변경 없음(빈 메모 문자열이 "지움"). */
 	@Transactional
 	public RelationView update(UUID userId, UUID relationId, UUID relationTypeId, String note) {

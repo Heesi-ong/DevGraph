@@ -74,10 +74,17 @@ public class NodeCommandService {
 	@Transactional
 	public NodeDetail createSubtypeNode(UUID userId, NodeType type, String title, String summary,
 			List<UUID> tagIds, String activityAction) {
+		return createSubtypeNode(userId, type, title, summary, null, tagIds, activityAction);
+	}
+
+	/** 본문(`bodyMd`)을 쓰는 subtype(예: Project의 설명)용. */
+	@Transactional
+	public NodeDetail createSubtypeNode(UUID userId, NodeType type, String title, String summary, String bodyMd,
+			List<UUID> tagIds, String activityAction) {
 		if (type == null || CREATABLE_TYPES.contains(type)) {
 			throw validation("type", "UNSUPPORTED_TYPE");
 		}
-		return createNode(userId, type, title, summary, null, tagIds, activityAction);
+		return createNode(userId, type, title, summary, bodyMd, tagIds, activityAction);
 	}
 
 	private NodeDetail createNode(UUID userId, NodeType type, String title, String summary, String bodyMd,
@@ -115,7 +122,14 @@ public class NodeCommandService {
 	@Transactional
 	public NodeDetail updateSubtypeNode(UUID userId, UUID nodeId, Long version, String title, String summary,
 			List<UUID> tagIds, boolean subtypeChanged, String activityAction) {
-		return doUpdate(userId, nodeId, version, title, summary, null, tagIds, true, subtypeChanged, activityAction);
+		return updateSubtypeNode(userId, nodeId, version, title, summary, null, tagIds, subtypeChanged, activityAction);
+	}
+
+	/** 본문(`bodyMd`)을 쓰는 subtype용. `bodyMd`가 null이면 변경 없음. */
+	@Transactional
+	public NodeDetail updateSubtypeNode(UUID userId, UUID nodeId, Long version, String title, String summary,
+			String bodyMd, List<UUID> tagIds, boolean subtypeChanged, String activityAction) {
+		return doUpdate(userId, nodeId, version, title, summary, bodyMd, tagIds, true, subtypeChanged, activityAction);
 	}
 
 	private NodeDetail doUpdate(UUID userId, UUID nodeId, Long version, String title, String summary, String bodyMd,

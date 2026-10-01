@@ -13,8 +13,8 @@ import { HighlightedText } from '../features/search/HighlightedText'
 import { clearRecentSearches, loadRecentSearches, rememberSearch } from '../features/search/recentSearches'
 import { EmptyState, ErrorState, LoadingState } from '../shared/ui/StateViews'
 
-const TYPES: AnyNodeType[] = ['CONCEPT', 'NOTE', 'SNIPPET']
-const FIELD_LABEL: Record<MatchedField, string> = { title: '제목', tag: '태그', language: '언어', body: '본문', code: '코드' }
+const TYPES: AnyNodeType[] = ['CONCEPT', 'NOTE', 'SNIPPET', 'ERROR', 'SOLUTION', 'PROJECT', 'RESOURCE']
+const FIELD_LABEL: Record<MatchedField, string> = { title: '제목', tag: '태그', language: '언어', body: '본문', code: '코드', error: '오류 메시지' }
 
 function readFilters(params: URLSearchParams): SearchFilters {
   return {
@@ -226,6 +226,11 @@ function ResultItem({ hit }: { hit: SearchHit }) {
         <p className="muted small search-excerpt">
           <HighlightedText segments={hit.highlight.body} />
         </p>
+      )}
+      {hit.highlight.error && (
+        <pre className="search-code" aria-label="오류 메시지 발췌">
+          <HighlightedText segments={hit.highlight.error} />
+        </pre>
       )}
       {hit.highlight.code && (
         <pre className="search-code">

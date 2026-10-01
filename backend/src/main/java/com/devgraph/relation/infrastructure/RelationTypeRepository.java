@@ -14,6 +14,9 @@ public interface RelationTypeRepository extends JpaRepository<RelationTypeJpaEnt
 	@Query("select t from RelationTypeJpaEntity t where t.active = true and (t.workspaceId is null or t.workspaceId = :ws) order by t.system desc, t.key")
 	List<RelationTypeJpaEntity> findAvailable(@Param("ws") UUID workspaceId);
 
+	@Query("select t from RelationTypeJpaEntity t where t.key = :key and t.workspaceId is null and t.active = true")
+	Optional<RelationTypeJpaEntity> findSystemByKey(@Param("key") String key);
+
 	@Query("select t from RelationTypeJpaEntity t where t.id = :id and t.active = true and (t.workspaceId is null or t.workspaceId = :ws)")
 	Optional<RelationTypeJpaEntity> findAvailableById(@Param("id") UUID id, @Param("ws") UUID workspaceId);
 }

@@ -20,7 +20,9 @@ import com.devgraph.knowledge.domain.NodeType;
 @Repository
 public class KnowledgeNodeQueryRepository {
 
-	private static final List<NodeType> LIBRARY_TYPES = List.of(NodeType.CONCEPT, NodeType.NOTE);
+	// Library(§8): Concept·Note·Error·Solution·Resource. Snippet과 Project는 각자의 작업 공간이 있다.
+	private static final List<NodeType> LIBRARY_TYPES = List.of(NodeType.CONCEPT, NodeType.NOTE, NodeType.ERROR,
+			NodeType.SOLUTION, NodeType.RESOURCE);
 
 	@PersistenceContext
 	private EntityManager entityManager;
@@ -32,7 +34,7 @@ public class KnowledgeNodeQueryRepository {
 		if (type != null) {
 			jpql.append(" and n.nodeType = :type");
 		} else {
-			// Library 범위: Snippet은 독립 작업 공간이라 목록에서 제외한다(§8.1). 다른 타입은 해당 Phase에서 정한다.
+			// Library 범위: Snippet(독립 작업 공간)과 Project는 목록에서 제외한다(§8, §8.1).
 			jpql.append(" and n.nodeType in :libraryTypes");
 		}
 		if (tagId != null) {

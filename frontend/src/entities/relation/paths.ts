@@ -1,6 +1,10 @@
 import type { AnyNodeType } from '../knowledge-node/types'
 
-// Snippet은 전용 화면이 있고 나머지는 지식 상세 화면을 쓴다(Error/Solution/Project 화면은 Phase 6).
+// 타입마다 전용 상세 화면이 있다. Concept/Note만 공통 지식 상세(/nodes)를 쓴다.
+const PREFIX: Record<AnyNodeType, string> = {
+  CONCEPT: 'nodes', NOTE: 'nodes', SNIPPET: 'snippets', ERROR: 'errors', SOLUTION: 'solutions', PROJECT: 'projects', RESOURCE: 'resources',
+}
+
 export function nodePath(type: AnyNodeType, id: string) {
-  return type === 'SNIPPET' ? `/snippets/${id}` : `/nodes/${id}`
+  return `/${PREFIX[type]}/${id}`
 }

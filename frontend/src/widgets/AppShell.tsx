@@ -23,6 +23,9 @@ export function AppShell() {
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/library">Library</NavLink>
           <NavLink to="/snippets">Snippets</NavLink>
+          <NavLink to="/problems">Problems</NavLink>
+          <NavLink to="/projects">Projects</NavLink>
+          <NavLink to="/resources">Resources</NavLink>
           <NavLink to="/graph">Graph</NavLink>
         </nav>
         <GlobalSearchBox />

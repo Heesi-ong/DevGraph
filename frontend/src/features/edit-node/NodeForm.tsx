@@ -27,7 +27,8 @@ const FIELD_LABELS: Record<string, string> = {
 
 export function NodeForm({ mode, initial, initialType = 'CONCEPT', onSaved, onCancel }: Props) {
   const queryClient = useQueryClient()
-  const [type, setType] = useState<NodeType>(initial?.type ?? initialType)
+  // 이 폼은 Concept/Note만 다룬다(다른 타입은 전용 화면). 서버가 준 type은 더 넓은 유니온이라 좁혀 쓴다.
+  const [type, setType] = useState<NodeType>((initial?.type as NodeType | undefined) ?? initialType)
   const [title, setTitle] = useState(initial?.title ?? '')
   const [summary, setSummary] = useState(initial?.summary ?? '')
   const [bodyMd, setBodyMd] = useState(initial?.bodyMd ?? '')

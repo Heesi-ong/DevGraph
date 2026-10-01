@@ -8,7 +8,8 @@ export type NodeStatus = 'ACTIVE' | 'ARCHIVED' | 'TRASHED'
 
 export interface NodeSummary {
   id: string
-  type: NodeType
+  // Library 목록은 Concept·Note·Error·Solution·Resource를 함께 준다.
+  type: AnyNodeType
   title: string
   summary: string | null
   status: NodeStatus
@@ -32,7 +33,7 @@ export interface PageResponse<T> {
 }
 
 export interface NodeFilters {
-  type?: NodeType
+  type?: AnyNodeType
   tagId?: string
   status?: NodeStatus
   favorite?: boolean

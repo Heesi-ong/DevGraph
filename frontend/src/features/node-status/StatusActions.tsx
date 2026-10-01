@@ -1,9 +1,8 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { transitionNode, type NodeTransition } from '../../entities/knowledge-node/api'
-import { nodeKeys } from '../../entities/knowledge-node/queryKeys'
 import type { NodeStatus } from '../../entities/knowledge-node/types'
-import { snippetKeys } from '../../entities/snippet/queryKeys'
+import { useInvalidateRelationViews } from '../relations/useInvalidateRelationViews'
 import { toApiError } from '../../shared/api/errors'
 
 interface Action {
@@ -28,15 +27,14 @@ const ACTIONS: Record<NodeStatus, Action[]> = {
 
 // Concept/Note/Snippet 모두 같은 상태 전이 endpoint(/nodes/{id}/...)를 쓴다.
 export function StatusActions({ node }: { node: { id: string; version: number; status: NodeStatus } }) {
-  const queryClient = useQueryClient()
+  const invalidate = useInvalidateRelationViews()
   const [message, setMessage] = useState<string | null>(null)
 
   const run = useMutation({
     mutationFn: (transition: NodeTransition) => transitionNode(node.id, node.version, transition),
     onSuccess: async () => {
       setMessage(null)
-      await queryClient.invalidateQueries({ queryKey: nodeKeys.all })
-      await queryClient.invalidateQueries({ queryKey: snippetKeys.all })
+      await invalidate()
     },
     onError: async (err) => {
       const info = toApiError(err)
@@ -47,8 +45,7 @@ export function StatusActions({ node }: { node: { id: string; version: number; s
             ? '현재 상태에서는 할 수 없는 작업입니다.'
             : info.message,
       )
-      await queryClient.invalidateQueries({ queryKey: nodeKeys.detail(node.id) })
-      await queryClient.invalidateQueries({ queryKey: snippetKeys.detail(node.id) })
+      await invalidate()
     },
   })
 
